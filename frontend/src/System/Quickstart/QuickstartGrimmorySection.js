@@ -164,7 +164,9 @@ class QuickstartGrimmorySection extends Component {
       schemaSelectionError
     } = this.state;
 
-    const buttonText = translate('AddName', { name: 'Grimmory' });
+    const buttonText = grimmoryNotification ?
+      translate('ConfigureName', { name: 'Grimmory' }) :
+      translate('AddName', { name: 'Grimmory' });
     const isAddSchemaLoading = !grimmoryNotification &&
       (this.props.notificationsState.isSchemaFetching || pendingOpenGrimmory);
     const schemaError = !this.props.notificationsState.isSchemaFetching &&
