@@ -16,6 +16,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
     {
         List<GrimmoryLibrary> GetLibraries(GrimmorySettings settings);
         void RefreshLibrary(GrimmorySettings settings, int libraryId);
+        void SyncLibraryFiles(GrimmorySettings settings);
         ValidationFailure Test(GrimmorySettings settings);
     }
 
@@ -55,6 +56,29 @@ namespace NzbDrone.Core.Notifications.Grimmory
             });
 
             _logger.Debug("Triggered Grimmory refresh for library {0}", libraryId);
+        }
+
+        public void SyncLibraryFiles(GrimmorySettings settings)
+        {
+            try
+            {
+                ExecuteWithAuth(settings, token =>
+                {
+                    var request = BuildRequest(settings, "api/v1/tasks/start", token).Build();
+                    request.Method = HttpMethod.Post;
+                    request.Headers.ContentType = "application/json";
+                    request.SuppressHttpError = true;
+                    request.SetContent(new { taskType = "SYNC_LIBRARY_FILES" }.ToJson());
+                    return _httpClient.Execute(request);
+                });
+            }
+            catch (HttpException ex) when (ex.Response?.Content?.Contains("already running", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                _logger.Debug("Grimmory library file sync is already running");
+                return;
+            }
+
+            _logger.Debug("Triggered Grimmory library file sync");
         }
 
         public ValidationFailure Test(GrimmorySettings settings)
