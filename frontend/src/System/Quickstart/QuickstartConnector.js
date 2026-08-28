@@ -53,11 +53,6 @@ function createMapStateToProps() {
         notification.implementationName === 'AudioBookShelf'
       );
 
-      // Find first Grimmory notification
-      const grimmoryNotification = notifications.find((notification) =>
-        notification.implementationName === 'Grimmory'
-      );
-
       // Check if proxy is configured
       const proxyMode = generalSettings.item?.proxyMode?.value || 'disabled';
       const globalProxyId = generalSettings.item?.globalProxyId?.value;
@@ -78,10 +73,8 @@ function createMapStateToProps() {
       return {
         hasActiveMAMIndexer: !!(mamIndexer && mamIndexer.enable),
         hasActiveAudioBookShelf: !!(audioBookShelfNotification && audioBookShelfNotification.enable),
-        hasActiveGrimmory: !!(grimmoryNotification && grimmoryNotification.enable),
         mamIndexer,
         audioBookShelfNotification,
-        grimmoryNotification,
         indexersState,
         notificationsState,
         downloadClientsState,
