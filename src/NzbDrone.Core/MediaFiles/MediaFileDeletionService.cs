@@ -148,7 +148,20 @@ namespace NzbDrone.Core.MediaFiles
                 }
                 else
                 {
-                    _calibre.DeleteBook(bookFile, rootFolder.CalibreSettings);
+                    if (bookFile.CalibreId == 0)
+                    {
+                        bookFile.CalibreId = _calibre.GetCalibreIdForPath(bookFile.Path, rootFolder.CalibreSettings);
+                    }
+
+                    if (bookFile.CalibreId != 0)
+                    {
+                        _calibre.DeleteBook(bookFile, rootFolder.CalibreSettings);
+                    }
+                    else if (_diskProvider.FileExistsCanonical(bookFile.Path))
+                    {
+                        _logger.Warn("Calibre does not know book file ({0}), deleting it from disk instead.", bookFile.Path);
+                        _recycleBinProvider.DeleteFile(bookFile.Path, subfolder);
+                    }
                 }
             }
             catch (Exception e)

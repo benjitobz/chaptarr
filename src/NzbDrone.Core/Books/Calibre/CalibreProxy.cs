@@ -31,6 +31,7 @@ namespace NzbDrone.Core.Books.Calibre
         void RemoveFormats(int calibreId, IEnumerable<string> formats, CalibreSettings settings);
         void SetFields(BookFile file, CalibreSettings settings, bool updateCover = true, bool embed = false);
         List<string> GetAllBookFilePaths(CalibreSettings settings);
+        int GetCalibreIdForPath(string path, CalibreSettings settings);
         CalibreBook GetBook(int calibreId, CalibreSettings settings);
         List<CalibreBook> GetBooks(List<int> calibreId, CalibreSettings settings);
         void Test(CalibreSettings settings);
@@ -446,6 +447,19 @@ namespace NzbDrone.Core.Books.Calibre
             {
                 throw new CalibreException("Unable to connect to Calibre library: {0}", ex, ex.Message);
             }
+        }
+
+        public int GetCalibreIdForPath(string path, CalibreSettings settings)
+        {
+            var book = _bookCache.Find(path);
+
+            if (book == null)
+            {
+                GetAllBookFilePaths(settings);
+                book = _bookCache.Find(path);
+            }
+
+            return book?.Id ?? 0;
         }
 
         public List<string> GetAllBookFilePaths(CalibreSettings settings)
