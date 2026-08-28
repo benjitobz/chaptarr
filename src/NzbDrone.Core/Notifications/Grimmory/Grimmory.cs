@@ -5,6 +5,7 @@ using FluentValidation.Results;
 using NLog;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Books;
+using NzbDrone.Core.MediaFiles;
 using NzbDrone.Core.Qualities;
 
 namespace NzbDrone.Core.Notifications.Grimmory
