@@ -29,6 +29,13 @@ namespace NzbDrone.Core.Notifications.Grimmory
             if (message.BookFiles?.Any(x => IsEbook(x.Quality)) == true)
             {
                 RefreshLibrary("import");
+
+                // Upgrades delete the replaced files; the refresh endpoint only ingests new
+                // files, so removals need the file sync task to be pruned.
+                if (message.OldFiles?.Any() == true)
+                {
+                    SyncLibraryFiles("upgrade");
+                }
             }
         }
 
@@ -36,7 +43,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
         {
             if (renamedFiles?.Any(x => x?.BookFile != null && IsEbook(x.BookFile.Quality)) == true)
             {
-                RefreshLibrary("rename");
+                SyncLibraryFiles("rename");
             }
         }
 
@@ -44,7 +51,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
         {
             if (message.DeletedFiles && message.Book?.MediaType != BookMediaType.Audiobook)
             {
-                RefreshLibrary("book delete");
+                SyncLibraryFiles("book delete");
             }
         }
 
@@ -52,7 +59,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
         {
             if (IsEbook(message.BookFile?.Quality))
             {
-                RefreshLibrary("file delete");
+                SyncLibraryFiles("file delete");
             }
         }
 
@@ -117,6 +124,19 @@ namespace NzbDrone.Core.Notifications.Grimmory
             catch (Exception ex)
             {
                 _logger.Warn(ex, "Failed to trigger Grimmory library refresh after {0}", reason);
+            }
+        }
+
+        private void SyncLibraryFiles(string reason)
+        {
+            try
+            {
+                _logger.Debug("Grimmory: triggering library file sync after {0}", reason);
+                _proxy.SyncLibraryFiles(Settings);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, "Failed to trigger Grimmory library file sync after {0}", reason);
             }
         }
 
