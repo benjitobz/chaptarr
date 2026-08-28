@@ -22,8 +22,7 @@ import { coerceFolderType, FolderType } from 'Helpers/Props/folderTypes';
 import translate from 'Utilities/String/translate';
 import styles from './EditRootFolderModalContent.css';
 
-// Temporary toggle: hide Calibre controls in the GUI until Calibre support is restored.
-const SHOW_CALIBRE_UI = false;
+const SHOW_CALIBRE_UI = true;
 
 class EditRootFolderModalContent extends Component {
   constructor(props, context) {
