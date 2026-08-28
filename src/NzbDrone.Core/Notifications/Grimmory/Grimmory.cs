@@ -131,6 +131,11 @@ namespace NzbDrone.Core.Notifications.Grimmory
         {
             try
             {
+                // The notification fires on the same event that queues the actual file deletion,
+                // with no ordering guarantee - a sync sent immediately can scan before the file
+                // is off the disk and find nothing missing. Give the deletion time to land.
+                System.Threading.Thread.Sleep(TimeSpan.FromSeconds(10));
+
                 _logger.Debug("Grimmory: triggering library file sync after {0}", reason);
                 _proxy.SyncLibraryFiles(Settings);
             }
