@@ -1515,6 +1515,8 @@
   "QuickstartCustomFormatsTitle": "3. Custom Formats (Optional)",
   "QuickstartDownloadClientsDescription": "Configure download clients to handle your audiobook downloads. Download clients manage torrent and usenet downloads.",
   "QuickstartDownloadClientsTitle": "2. Download Clients",
+  "QuickstartGrimmoryConnectDescription": "Connect to Grimmory so Chaptarr can trigger targeted library refreshes after ebook imports, renames, and deletes.",
+  "QuickstartGrimmoryConnectHeader": "Connect Grimmory",
   "QuickstartHardcoverConnectDescription": "Connect to Hardcover to enable direct metadata searching and library-based features.",
   "QuickstartMamAddMyAnonaMouse": "Add MyAnonaMouse",
   "QuickstartMamSectionDescription": "Add indexers to search for audiobooks.",
