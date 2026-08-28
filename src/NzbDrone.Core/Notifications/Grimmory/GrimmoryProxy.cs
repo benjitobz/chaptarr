@@ -68,7 +68,10 @@ namespace NzbDrone.Core.Notifications.Grimmory
                     request.Method = HttpMethod.Post;
                     request.Headers.ContentType = "application/json";
                     request.SuppressHttpError = true;
-                    request.SetContent(new { taskType = "SYNC_LIBRARY_FILES" }.ToJson());
+                    // options must be explicitly null: Grimmory's TaskCreateRequest resolves the
+                    // options type from taskType (external property) and rejects the body when
+                    // the property is absent for task types without a registered options class.
+                    request.SetContent(new { taskType = "SYNC_LIBRARY_FILES", triggeredByCron = false, options = (object)null }.ToJson());
                     return _httpClient.Execute(request);
                 });
             }
