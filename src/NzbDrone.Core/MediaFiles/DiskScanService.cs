@@ -183,7 +183,7 @@ namespace NzbDrone.Core.MediaFiles
                     {
                         _logger.Warn("Skipping scan cleanup for {0} because file enumeration did not complete safely", folder);
                     }
-                    else if (!result.ScannedFilePaths.Any())
+                    else if (!result.ScannedFilePaths.Any() && !(rootFolder.IsCalibreLibrary && rootFolder.CalibreSettings != null))
                     {
                         _logger.Warn("Skipping scan cleanup for {0} because the scan found no media files. This avoids wiping tracked files when a mount is visible but empty.", folder);
                     }

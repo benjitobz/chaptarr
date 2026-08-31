@@ -148,7 +148,31 @@ namespace NzbDrone.Core.MediaFiles
                 }
                 else
                 {
-                    _calibre.DeleteBook(bookFile, rootFolder.CalibreSettings);
+                    if (bookFile.CalibreId == 0)
+                    {
+                        bookFile.CalibreId = _calibre.GetCalibreIdForPath(bookFile.Path, rootFolder.CalibreSettings);
+                    }
+
+                    if (bookFile.CalibreId != 0)
+                    {
+                        var format = System.IO.Path.GetExtension(bookFile.Path).TrimStart('.');
+                        var calibreBook = _calibre.GetBook(bookFile.CalibreId, rootFolder.CalibreSettings);
+
+                        if (format.IsNotNullOrWhiteSpace() && calibreBook?.Formats?.Count > 1)
+                        {
+                            // Deleting one of several formats must not remove the whole book
+                            _calibre.RemoveFormats(bookFile.CalibreId, new[] { format }, rootFolder.CalibreSettings);
+                        }
+                        else
+                        {
+                            _calibre.DeleteBook(bookFile, rootFolder.CalibreSettings);
+                        }
+                    }
+                    else if (_diskProvider.FileExistsCanonical(bookFile.Path))
+                    {
+                        _logger.Warn("Calibre does not know book file ({0}), deleting it from disk instead.", bookFile.Path);
+                        _recycleBinProvider.DeleteFile(bookFile.Path, subfolder);
+                    }
                 }
             }
             catch (Exception e)

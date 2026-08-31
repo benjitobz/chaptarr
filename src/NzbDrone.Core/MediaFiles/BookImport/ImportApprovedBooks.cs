@@ -27,6 +27,7 @@ using NzbDrone.Core.Extras;
 using NzbDrone.Core.History;
 using NzbDrone.Core.Instrumentation;
 using NzbDrone.Core.MediaFiles; // for IMoveBookFiles
+using NzbDrone.Core.RootFolders;
 using NzbDrone.Core.MediaFiles.Events;
 using NzbDrone.Core.MediaFiles.BookImport.Services;
 using NzbDrone.Core.MediaCover;
@@ -86,6 +87,8 @@ namespace NzbDrone.Core.MediaFiles.BookImport
             private readonly IConversionTrackingService _conversionTrackingService;
             private readonly IConversionJobService _conversionJobService;
             private readonly IDiskProvider _diskProvider;
+            private readonly IRootFolderService _rootFolderService;
+            private readonly ICalibreProxy _calibre;
             private readonly IConfigService _configService;
             private readonly IContainmentValidator _containmentValidator;
             private readonly IMapCoversToLocal _coverMapper;
@@ -117,7 +120,9 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 IContainmentValidator containmentValidator = null,
                 IMapCoversToLocal coverMapper = null,
                 ICustomFormatCalculationService customFormatCalculationService = null,
-                IConversionJobService conversionJobService = null)
+                IConversionJobService conversionJobService = null,
+                IRootFolderService rootFolderService = null,
+                ICalibreProxy calibre = null)
             {
             _mediaFileService = mediaFileService;
             _metadataTagService = metadataTagService;
@@ -143,6 +148,8 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 _containmentValidator = containmentValidator;
                 _coverMapper = coverMapper;
                 _customFormatCalculationService = customFormatCalculationService;
+                _rootFolderService = rootFolderService;
+                _calibre = calibre;
                 _logger = logger;
             }
 
@@ -1318,7 +1325,21 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                     try
                     {
                         var transferStopwatch = Stopwatch.StartNew();
-                        if (copyOnly)
+                        var calibreRoot = _rootFolderService != null && _calibre != null && localBook.Author?.Path.IsNotNullOrWhiteSpace() == true
+                            ? _rootFolderService.GetBestRootFolder(Path.GetDirectoryName(localBook.Author.Path.TrimEnd(Path.DirectorySeparatorChar)))
+                            : null;
+
+                        if (calibreRoot?.IsCalibreLibrary == true && calibreRoot.CalibreSettings != null)
+                        {
+                            var calibreSource = bookFile.Path;
+                            bookFile = _calibre.AddAndConvert(bookFile, calibreRoot.CalibreSettings);
+
+                            if (!copyOnly && calibreSource != bookFile.Path)
+                            {
+                                File.Delete(calibreSource);
+                            }
+                        }
+                        else if (copyOnly)
                         {
                             bookFile = _bookFileMover.CopyBookFile(bookFile, localBook);
                         }
