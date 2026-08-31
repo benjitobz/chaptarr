@@ -1542,10 +1542,13 @@ namespace NzbDrone.Core.Books
                 return true;
             }
 
-            if (!string.IsNullOrWhiteSpace(book.UnitKeyHash))
+            if (!string.IsNullOrWhiteSpace(book.UnitKeyHash) &&
+                (HasKnownFiles(book) || book.Added > DateTime.UtcNow.AddMinutes(-15)))
             {
-                // UnitKeyHash is the durable identity of an intentional multi-copy row. Refresh
-                // may update it from the server pocket, but must never merge it away as a duplicate.
+                // UnitKeyHash is the durable identity of an intentional multi-copy row while its
+                // physical copy exists; the grace window covers a fresh clone whose files are still
+                // attaching. A file-less clone past that window is leftover from a deleted copy and
+                // may be merged away as a duplicate.
                 return true;
             }
 
