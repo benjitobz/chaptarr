@@ -757,6 +757,30 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                                 throw new InvalidOperationException($"Matched book not found: {canonicalEdition.BookId}");
                             }
 
+                            var trackedRow = _mediaFileRepository.GetFileWithPath(m.File.Path);
+                            if (trackedRow != null && trackedRow.EditionId > 0)
+                            {
+                                var trackedEdition = _editionService.GetEdition(trackedRow.EditionId);
+                                if (trackedEdition != null && trackedEdition.BookId != canonicalBook.Id)
+                                {
+                                    _logger.Warn("[SCAN] File {0} is already linked to BookId={1} but the matcher proposed BookId={2}; keeping the existing link and skipping destination resolution",
+                                        m.File.Path,
+                                        trackedEdition.BookId,
+                                        canonicalBook.Id);
+                                    _ingestQueue.CompleteItemWithResult(
+                                        itemRef.Id,
+                                        m.File.Path,
+                                        ImportOutcome.AlreadyLinked,
+                                        bookId: trackedEdition.BookId,
+                                        authorId: m.AuthorId,
+                                        quality: "Unknown",
+                                        errorMessage: "ALREADY_LINKED_DIFFERENT_BOOK",
+                                        statusError: null);
+                                    matchedPaths.Add(m.File.Path);
+                                    continue;
+                                }
+                            }
+
                             var destKey = _unitDestination.BuildRootUnitKeyWithExtension(m.File.Path, canonicalEdition.Title, canonicalBook.MediaType);
                             var dest = _unitDestination.ResolveDestinationForUnit(canonicalBook, canonicalEdition, destKey);
                             destBookId = dest.BookId;

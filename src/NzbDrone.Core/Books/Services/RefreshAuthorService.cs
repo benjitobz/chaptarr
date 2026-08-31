@@ -1578,6 +1578,7 @@ namespace NzbDrone.Core.Books
             private readonly Dictionary<string, List<Book>> _booksByProviderToken;
             private readonly Dictionary<int, int> _sourceOrderByBookId;
             private readonly HashSet<int> _activeBookIds;
+            private readonly HashSet<string> _consumedStableWorkTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             private BookRefreshMatchingIndex(
                 List<Book> source,
@@ -1667,6 +1668,7 @@ namespace NzbDrone.Core.Books
                 if (existingChild?.Id > 0)
                 {
                     _activeBookIds.Remove(existingChild.Id);
+                    _consumedStableWorkTokens.UnionWith(BookIdentity.GetStableWorkProviderIdentityTokens(existingChild));
                 }
 
                 foreach (var child in mergedChildren ?? Enumerable.Empty<Book>())
@@ -1674,9 +1676,32 @@ namespace NzbDrone.Core.Books
                     if (child?.Id > 0)
                     {
                         _activeBookIds.Remove(child.Id);
+                        _consumedStableWorkTokens.UnionWith(BookIdentity.GetStableWorkProviderIdentityTokens(child));
                     }
                 }
             }
+
+            public bool HasConsumedStableWorkOverlap(Book remote)
+            {
+                if (_consumedStableWorkTokens.Count == 0)
+                {
+                    return false;
+                }
+
+                return BookIdentity.GetStableWorkProviderIdentityTokens(remote).Overlaps(_consumedStableWorkTokens);
+            }
+        }
+
+        protected override bool ShouldSkipChildAdd(Author entity, Book remoteChild)
+        {
+            var index = _bookRefreshMatchingIndex;
+            if (index == null || !index.HasConsumedStableWorkOverlap(remoteChild))
+            {
+                return false;
+            }
+
+            _logger.Info("[REFRESH-DUP-GUARD] Remote book '{0}' shares stable work identity with a local book already matched in this refresh pass; skipping duplicate add", remoteChild?.Title);
+            return true;
         }
 
         protected override Tuple<Book, List<Book>> GetMatchingExistingChildren(List<Book> existingChildren, Book remote)
