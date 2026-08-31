@@ -5599,6 +5599,47 @@ namespace NzbDrone.Core.MediaFiles.BookImport
             /// <summary>
             /// Run FTS search and smoke test each result. Returns first match that passes smoke test.
             /// </summary>
+            private static readonly HashSet<string> SurplusVolumeMarkerTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "set", "sets", "collection", "collections", "boxset", "boxed", "bundle", "omnibus", "trilogy", "duology", "sampler", "esampler", "books"
+            };
+
+            private bool WinnerTitleHasSurplusVolumeToken(EditionFtsMatch winner, List<string> queryTokens, out string surplusToken)
+            {
+                surplusToken = null;
+
+                var title = winner?.BookTitle;
+                if (string.IsNullOrWhiteSpace(title) || queryTokens == null || queryTokens.Count == 0)
+                {
+                    return false;
+                }
+
+                var queryTokenSet = new HashSet<string>(queryTokens.Where(t => !string.IsNullOrWhiteSpace(t)), StringComparer.OrdinalIgnoreCase);
+                if (queryTokenSet.Count == 0)
+                {
+                    return false;
+                }
+
+                foreach (var token in SplitTokens(title))
+                {
+                    var trimmed = token.Trim('.', '-');
+                    if (trimmed.Length == 0 || queryTokenSet.Contains(token) || queryTokenSet.Contains(trimmed))
+                    {
+                        continue;
+                    }
+
+                    if (trimmed.All(char.IsDigit) ||
+                        SeriesPositionTokenHelper.LooksLikeRomanNumeralToken(trimmed) ||
+                        SurplusVolumeMarkerTokens.Contains(trimmed))
+                    {
+                        surplusToken = trimmed;
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
             private FtsSmokeTestResult RunFtsWithSmokeTest(
             int? authorId,
             List<string> tokens,
@@ -7314,6 +7355,18 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                         titleEvidenceCandidateCount,
                         strictSeriesPositionRejectedCount,
                         leftoverRejectedCount);
+                    return null;
+                }
+
+                if (WinnerTitleHasSurplusVolumeToken(winner, tokens, out var surplusVolumeToken))
+                {
+                    RecordCandidateRejection(winner, "CANDIDATE_TITLE_SURPLUS_VOLUME_TOKEN",
+                        $"book title carries '{surplusVolumeToken}' with no counterpart in the file's title evidence", "contradictory");
+                    _logger.Debug("[HOLY-GRAIL][{0}] Rejecting selected candidate '{1}' (EditionId={2}): book title carries volume marker '{3}' absent from the file's title evidence",
+                        phase,
+                        winner.BookTitle,
+                        winner.EditionId,
+                        surplusVolumeToken);
                     return null;
                 }
 
