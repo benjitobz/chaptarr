@@ -1418,7 +1418,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                         SizeBytes = fi.Length,
                         TagsJson = "{}",
                         Status = "queued",
-                        ForceRequeue = forceStage || filter != FilterFilesType.Known
+                        ForceRequeue = forceStage || filter != FilterFilesType.Known || knownFile?.EditionId == 0
                     });
 
                     stagedCount++;
@@ -1528,7 +1528,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport
             {
                 FilterFilesType.None => true,
                 FilterFilesType.Matched => knownFile.EditionId == 0,
-                FilterFilesType.Known => !IsKnownFileUnchanged(diskFile, knownFile),
+                FilterFilesType.Known => knownFile.EditionId == 0 || !IsKnownFileUnchanged(diskFile, knownFile),
                 _ => throw new ArgumentOutOfRangeException(nameof(filter), filter, "Unrecognized file filter")
             };
         }
