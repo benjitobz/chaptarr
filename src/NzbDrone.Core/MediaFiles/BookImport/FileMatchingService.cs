@@ -22,6 +22,7 @@ using NzbDrone.Core.Books.Services;
 using NzbDrone.Core.Messaging.Commands;
 using NzbDrone.Core.Messaging.Events;
 using NzbDrone.Core.Books.Commands;
+using NzbDrone.Core.MediaFiles.Commands;
 using NzbDrone.Core.Books.Events;
 using NzbDrone.Core.Authors;
 using NzbDrone.Core.MediaFiles.TagExtraction;
@@ -503,6 +504,42 @@ namespace NzbDrone.Core.MediaFiles.BookImport
             _editionRepository = editionRepository;
             _mediaInfoExtractor = mediaInfoExtractor;
             _logger = logger;
+        }
+
+        private void QueueAuthorRefreshForUnmatched(int? authorId)
+        {
+            if (!authorId.HasValue || authorId.Value <= 0)
+            {
+                return;
+            }
+
+            Author author = null;
+            try
+            {
+                author = _authorService.GetAuthor(authorId.Value);
+            }
+            catch
+            {
+            }
+
+            QueueAuthorRefreshForUnmatched(author);
+        }
+
+        private void QueueAuthorRefreshForUnmatched(Author author)
+        {
+            if (author == null || author.Id <= 0)
+            {
+                return;
+            }
+
+            if (author.LastInfoSync.HasValue && author.LastInfoSync.Value > DateTime.UtcNow.AddMinutes(-30))
+            {
+                return;
+            }
+
+            _logger.Info("Files for author {0} did not match any local edition; queueing an author refresh so the local catalog can catch up", author.Name);
+            _commandQueue.Push(new RefreshAuthorCommand(author.Id, true, true, forceRefresh: true));
+            _commandQueue.Push(new RescanFoldersCommand(null, FilterFilesType.None, new List<int> { author.Id }));
         }
 
         private BookMatchingStrictness GetConfiguredMatchingStrictness()
@@ -1075,6 +1112,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                                 : decision.TriedUnscopedFallback || decision.SkippedScopedMatch
                                 ? $"NO_MATCH_HOLY_GRAIL (authorId={authorId}; unscopedFallback=true{(decision.SkippedScopedMatch ? "; scopedAuthorNotInTags=true" : string.Empty)})"
                                 : $"NO_MATCH_HOLY_GRAIL (authorId={authorId})";
+                            QueueAuthorRefreshForUnmatched(authorId);
 
                             groupedUnmatched.Add(new UnmatchedFile
                             {
@@ -1322,6 +1360,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                                     var reason = unitMatch == null
                                         ? $"NO_MATCH_HOLY_GRAIL (authorId={authorId}; unitRerunFailed=true)"
                                         : $"NO_MATCH_HOLY_GRAIL (authorId={authorId}; unitRerunChangedWork=true)";
+                                    QueueAuthorRefreshForUnmatched(authorId);
 
                                     groupedUnmatched.Add(new UnmatchedFile
                                     {
@@ -1434,6 +1473,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                                     : fileDecision.TriedUnscopedFallback || fileDecision.SkippedScopedMatch
                                         ? $"NO_MATCH_HOLY_GRAIL (authorId={authorId}; unscopedFallback=true{(fileDecision.SkippedScopedMatch ? "; scopedAuthorNotInTags=true" : string.Empty)})"
                                         : $"NO_MATCH_HOLY_GRAIL (authorId={authorId})";
+                                QueueAuthorRefreshForUnmatched(authorId);
 
                                 groupedUnmatched.Add(new UnmatchedFile
                                 {
@@ -2402,6 +2442,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                                                 processedAuthorFolders.Add(resolvedAuthorFolder);
                                             }
                                             _logger.Debug("[SHORT-CIRCUIT] Author exists but no local edition match; marking {0} files as UNMATCHED for author {1}", files.Count, s.ProviderId);
+                                            QueueAuthorRefreshForUnmatched(existing);
 
                                             foreach (var file in files)
                                             {
@@ -3168,6 +3209,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 return (strictMatch, suggestion, $"Recovered via V5 author '{s.AuthorName}'");
             }
 
+            QueueAuthorRefreshForUnmatched(recoveredAuthor);
             return (null, suggestion, $"NO_EDITION_FOUND (authorId={recoveredAuthor.Id})");
         }
 
