@@ -491,7 +491,18 @@ namespace NzbDrone.Core.Books.Calibre
                         var localPath = _pathMapper.RemapRemoteToLocal(settings.Host, new OsPath(remotePath)).FullPath;
                         result.Add(localPath);
 
-                        _bookCache.Set(localPath, book);
+                        // Cache every format, not just the original, so a converted file
+                        // (mobi, azw3) can still be resolved back to its calibre book.
+                        foreach (var format in book.Formats.Values)
+                        {
+                            if (format?.Path == null)
+                            {
+                                continue;
+                            }
+
+                            var formatPath = _pathMapper.RemapRemoteToLocal(settings.Host, new OsPath(format.Path)).FullPath;
+                            _bookCache.Set(formatPath, book);
+                        }
                     }
                 }
                 catch (HttpException ex)

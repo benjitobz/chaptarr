@@ -155,7 +155,18 @@ namespace NzbDrone.Core.MediaFiles
 
                     if (bookFile.CalibreId != 0)
                     {
-                        _calibre.DeleteBook(bookFile, rootFolder.CalibreSettings);
+                        var format = System.IO.Path.GetExtension(bookFile.Path).TrimStart('.');
+                        var calibreBook = _calibre.GetBook(bookFile.CalibreId, rootFolder.CalibreSettings);
+
+                        if (format.IsNotNullOrWhiteSpace() && calibreBook?.Formats?.Count > 1)
+                        {
+                            // Deleting one of several formats must not remove the whole book
+                            _calibre.RemoveFormats(bookFile.CalibreId, new[] { format }, rootFolder.CalibreSettings);
+                        }
+                        else
+                        {
+                            _calibre.DeleteBook(bookFile, rootFolder.CalibreSettings);
+                        }
                     }
                     else if (_diskProvider.FileExistsCanonical(bookFile.Path))
                     {
