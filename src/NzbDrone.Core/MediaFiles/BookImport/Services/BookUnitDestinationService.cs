@@ -142,6 +142,15 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             // Check files on BOOK level, not edition - prevents different folders from collapsing onto same book
             // when they match different editions of the same work
             var existingFiles = _mediaFileService.GetFilesByBook(canonicalBook.Id) ?? new List<BookFile>();
+
+            // Rows whose files are gone from disk (e.g. the book was just deleted in calibre and re-uploaded
+            // before cleanup ran) are not evidence of another physical copy and must not force a unit clone.
+            var staleRowCount = existingFiles.RemoveAll(f => string.IsNullOrWhiteSpace(f?.Path) || !File.Exists(f.Path));
+            if (staleRowCount > 0)
+            {
+                _logger.Debug("[UNIT-DEST] Ignored {0} tracked files missing from disk on BookId={1} while resolving unit destination", staleRowCount, canonicalBook.Id);
+            }
+
             if (existingFiles.Count == 0)
             {
                 // No existing files on canonical book → reuse canonical
