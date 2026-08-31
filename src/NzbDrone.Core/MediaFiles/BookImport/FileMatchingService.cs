@@ -5604,6 +5604,45 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 "set", "sets", "collection", "collections", "boxset", "boxed", "bundle", "omnibus", "trilogy", "duology", "sampler", "esampler", "books"
             };
 
+            private static readonly HashSet<string> TitleComparisonStopTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "the", "a", "an", "of", "and", "or", "in", "on", "at", "to", "for", "with", "by", "from", "is",
+                "retail", "unabridged", "abridged", "edition", "ebook", "book", "novel", "complete", "illustrated",
+                "epub", "mobi", "azw3", "azw", "pdf", "kepub"
+            };
+
+            private bool WinnerTitleSubstitutesFileTitle(EditionFtsMatch winner, List<string> queryTokens, out string candidateWord, out string queryWord)
+            {
+                candidateWord = null;
+                queryWord = null;
+
+                var title = winner?.BookTitle;
+                if (string.IsNullOrWhiteSpace(title) || queryTokens == null || queryTokens.Count == 0)
+                {
+                    return false;
+                }
+
+                bool Meaningful(string token) =>
+                    token.Length > 1 &&
+                    !token.All(char.IsDigit) &&
+                    !TitleComparisonStopTokens.Contains(token) &&
+                    !SeriesPositionTokenHelper.LooksLikeRomanNumeralToken(token);
+
+                var querySet = new HashSet<string>(queryTokens.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim('.', '-')), StringComparer.OrdinalIgnoreCase);
+                var candidateTokens = SplitTokens(title).Select(t => t.Trim('.', '-')).Where(t => t.Length > 0).ToList();
+                var candidateSet = new HashSet<string>(candidateTokens, StringComparer.OrdinalIgnoreCase);
+                var authorSet = new HashSet<string>(SplitTokens(winner.AuthorName ?? string.Empty).Select(t => t.Trim('.', '-')), StringComparer.OrdinalIgnoreCase);
+
+                candidateWord = candidateTokens.FirstOrDefault(t => Meaningful(t) && !querySet.Contains(t));
+                if (candidateWord == null)
+                {
+                    return false;
+                }
+
+                queryWord = querySet.FirstOrDefault(t => Meaningful(t) && !candidateSet.Contains(t) && !authorSet.Contains(t));
+                return queryWord != null;
+            }
+
             private bool WinnerTitleHasSurplusVolumeToken(EditionFtsMatch winner, List<string> queryTokens, out string surplusToken)
             {
                 surplusToken = null;
@@ -7355,6 +7394,19 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                         titleEvidenceCandidateCount,
                         strictSeriesPositionRejectedCount,
                         leftoverRejectedCount);
+                    return null;
+                }
+
+                if (WinnerTitleSubstitutesFileTitle(winner, tokens, out var substitutedCandidateWord, out var substitutedQueryWord))
+                {
+                    RecordCandidateRejection(winner, "CANDIDATE_TITLE_WORD_SUBSTITUTION",
+                        $"book title has '{substitutedCandidateWord}' while the file evidence has '{substitutedQueryWord}' instead", "contradictory");
+                    _logger.Debug("[HOLY-GRAIL][{0}] Rejecting selected candidate '{1}' (EditionId={2}): book title has '{3}' where the file evidence has '{4}'",
+                        phase,
+                        winner.BookTitle,
+                        winner.EditionId,
+                        substitutedCandidateWord,
+                        substitutedQueryWord);
                     return null;
                 }
 
