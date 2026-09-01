@@ -5640,7 +5640,42 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 }
 
                 queryWord = querySet.FirstOrDefault(t => Meaningful(t) && !candidateSet.Contains(t) && !authorSet.Contains(t));
+
+                if (queryWord != null &&
+                    (IsAdjacentConcatenation(candidateWord, queryTokens) || IsAdjacentConcatenation(queryWord, candidateTokens)))
+                {
+                    // "Lightbringer" vs "Light Bringer": one side merely joins the other's
+                    // adjacent words, so this is the same title, not a substitution.
+                    candidateWord = null;
+                    queryWord = null;
+                    return false;
+                }
+
                 return queryWord != null;
+            }
+
+            private static bool IsAdjacentConcatenation(string word, List<string> tokens)
+            {
+                if (word == null || tokens == null)
+                {
+                    return false;
+                }
+
+                for (var i = 0; i < tokens.Count - 1; i++)
+                {
+                    var pair = tokens[i] + tokens[i + 1];
+                    if (pair.Equals(word, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+
+                    if (i < tokens.Count - 2 && (pair + tokens[i + 2]).Equals(word, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
             }
 
             private bool WinnerTitleHasSurplusVolumeToken(EditionFtsMatch winner, List<string> queryTokens, out string surplusToken)
