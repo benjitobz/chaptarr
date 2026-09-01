@@ -202,6 +202,8 @@ namespace NzbDrone.Core.Datastore
                                                                     .Where<Edition>(edition => edition.Id == file.EditionId)).SingleOrDefault(),
                           f => f.EditionId > 0);
 
+            Mapper.Entity<ChapterBackfillLogEntry>("ChapterBackfillLog").RegisterModel();
+
             Mapper.Entity<QualityDefinition>("QualityDefinitions").RegisterModel()
                   .Ignore(d => d.GroupName)
                   .Ignore(d => d.GroupWeight)

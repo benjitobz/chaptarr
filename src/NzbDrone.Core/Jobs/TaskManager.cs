@@ -161,6 +161,13 @@ namespace NzbDrone.Core.Jobs
                     new ScheduledTask
                     {
                         Interval = 24 * 60,
+                        TypeName = typeof(ChapterBackfillCommand).FullName,
+                        Priority = CommandPriority.Low
+                    },
+
+                    new ScheduledTask
+                    {
+                        Interval = 24 * 60,
                         TypeName = typeof(RepairAuthorMediaCoversCommand).FullName,
                         Priority = CommandPriority.Low
                     },

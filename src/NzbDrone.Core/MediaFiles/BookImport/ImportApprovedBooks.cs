@@ -1805,50 +1805,21 @@ namespace NzbDrone.Core.MediaFiles.BookImport
 
             private void TryApplyMatchedEditionChapters(ConversionTagOptions tagOptions, Edition edition, TimeSpan sourceDuration, Book book)
             {
-                if (tagOptions == null || edition?.Chapters == null || edition.Chapters.Count < 2)
+                if (tagOptions == null)
                 {
                     return;
                 }
 
-                var chapters = edition.Chapters
-                    .Where(chapter => chapter != null &&
-                                      chapter.StartOffsetMs >= 0 &&
-                                      chapter.Title.IsNotNullOrWhiteSpace())
-                    .GroupBy(chapter => chapter.StartOffsetMs)
-                    .Select(group => group.First())
-                    .OrderBy(chapter => chapter.StartOffsetMs)
-                    .ToList();
-
-                if (chapters.Count < 2 || sourceDuration <= TimeSpan.Zero)
+                if (!EditionChapterValidation.TryValidate(edition, sourceDuration, out var chapters, out var skipReason))
                 {
-                    return;
-                }
+                    if (skipReason.IsNotNullOrWhiteSpace())
+                    {
+                        _logger.Debug(
+                            "[CONVERSION] Skipping provider chapters for '{0}' because {1}.",
+                            book?.Title ?? edition?.Title,
+                            skipReason);
+                    }
 
-                var referenceDuration = GetMatchedEditionChapterReferenceDuration(edition, chapters);
-                if (referenceDuration <= TimeSpan.Zero)
-                {
-                    return;
-                }
-
-                var allowedDifference = AudiobookDurationTolerance.ForMatchingSeconds((int)Math.Round(referenceDuration.TotalSeconds, MidpointRounding.AwayFromZero));
-                var actualDifference = (sourceDuration - referenceDuration).Duration();
-                if (actualDifference > TimeSpan.FromSeconds(allowedDifference))
-                {
-                    _logger.Debug(
-                        "[CONVERSION] Skipping provider chapters for '{0}' because source duration {1} does not match provider chapter duration {2}; allowed difference is {3}.",
-                        book?.Title ?? edition.Title,
-                        FormatDuration(sourceDuration),
-                        FormatDuration(referenceDuration),
-                        FormatDuration(TimeSpan.FromSeconds(allowedDifference)));
-                    return;
-                }
-
-                var lastStart = TimeSpan.FromMilliseconds(chapters.Last().StartOffsetMs);
-                if (lastStart >= sourceDuration)
-                {
-                    _logger.Debug(
-                        "[CONVERSION] Skipping provider chapters for '{0}' because the last chapter starts after the source audio ends.",
-                        book?.Title ?? edition.Title);
                     return;
                 }
 
@@ -2222,27 +2193,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 return signature.ToString();
             }
 
-            private static TimeSpan GetMatchedEditionChapterReferenceDuration(Edition edition, IReadOnlyList<EditionChapter> chapters)
-            {
-                var chapterEndMs = chapters
-                    .Where(chapter => chapter.LengthMs > 0)
-                    .Select(chapter => chapter.StartOffsetMs + chapter.LengthMs)
-                    .DefaultIfEmpty(0)
-                    .Max();
-
-                if (chapterEndMs > 0)
-                {
-                    return TimeSpan.FromMilliseconds(chapterEndMs);
-                }
-
-                if (MediaDuration.HasDuration(edition?.DurationSeconds))
-                {
-                    return TimeSpan.FromSeconds(edition.DurationSeconds.Value);
-                }
-
-                return TimeSpan.Zero;
-            }
-
             private static string BuildChaptersTxt(IReadOnlyList<EditionChapter> chapters, TimeSpan sourceDuration)
             {
                 var lines = new List<string>
@@ -2266,11 +2216,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                     value.Minutes,
                     value.Seconds,
                     value.Milliseconds);
-            }
-
-            private static string FormatDuration(TimeSpan value)
-            {
-                return FormatChapterTime(value);
             }
 
             private static string SanitizeChapterTitle(string title)
