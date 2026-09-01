@@ -191,6 +191,13 @@ namespace NzbDrone.Core.Jobs
 
                     new ScheduledTask
                     {
+                        Interval = GetMissingBookSearchInterval(),
+                        TypeName = typeof(MissingBookSearchCommand).FullName,
+                        Priority = CommandPriority.Low
+                    },
+
+                    new ScheduledTask
+                    {
                         Interval = 1, // Run every minute
                         TypeName = typeof(ProcessPendingImportsCommand).FullName,
                         Priority = CommandPriority.Low
@@ -260,6 +267,19 @@ namespace NzbDrone.Core.Jobs
             return interval * 60 * 24;
         }
 
+        private int GetMissingBookSearchInterval()
+        {
+            var interval = _configService.MissingBookSearchInterval;
+
+            if (interval > 0 && interval < 15)
+            {
+                // Be polite to trackers: never search the backlog more than every 15 minutes.
+                return 15;
+            }
+
+            return interval;
+        }
+
         private int GetRssSyncInterval()
         {
             var interval = _configService.RssSyncInterval;
@@ -317,7 +337,10 @@ namespace NzbDrone.Core.Jobs
             var backup = _scheduledTaskRepository.GetDefinition(typeof(BackupCommand));
             backup.Interval = GetBackupInterval();
 
-            _scheduledTaskRepository.UpdateMany(new List<ScheduledTask> { rss, backup });
+            var missingSearch = _scheduledTaskRepository.GetDefinition(typeof(MissingBookSearchCommand));
+            missingSearch.Interval = GetMissingBookSearchInterval();
+
+            _scheduledTaskRepository.UpdateMany(new List<ScheduledTask> { rss, backup, missingSearch });
 
             _cache.Set(rss.TypeName, rss);
             _cache.Set(backup.TypeName, backup);
