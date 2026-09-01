@@ -1330,7 +1330,12 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                             ? _rootFolderService.GetBestRootFolder(Path.GetDirectoryName(localBook.Author.Path.TrimEnd(Path.DirectorySeparatorChar)))
                             : null;
 
-                        if (calibreRoot?.IsCalibreLibrary == true && calibreRoot.CalibreSettings != null)
+                        // Calibre manages ebooks only. Audiobooks in a mixed calibre root are plain
+                        // file transfers; pushing audio through the content server would corrupt the library.
+                        var importExtension = (Path.GetExtension(bookFile.Path) ?? string.Empty).ToLowerInvariant();
+                        var isAudioImport = MediaFileExtensions.AudioExtensions.Contains(importExtension);
+
+                        if (!isAudioImport && calibreRoot?.IsCalibreLibrary == true && calibreRoot.CalibreSettings != null)
                         {
                             if (bookFile.CalibreId == 0 && bookFile.EditionId > 0)
                             {
