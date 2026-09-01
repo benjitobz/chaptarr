@@ -194,9 +194,37 @@ namespace NzbDrone.Core.MediaFiles
 
                 if (isCalibre)
                 {
-                    // use authorId for the query
+                    // The author's books and editions are already gone from the database when this event
+                    // fires, so the author-id query alone returns nothing. Find the rows by path as well.
                     var books = _mediaFileService.GetFilesByAuthor(author.Id);
-                    _calibre.DeleteBooks(books, rootFolder.CalibreSettings);
+                    if (!string.IsNullOrWhiteSpace(author.Path))
+                    {
+                        var byPath = _mediaFileService.GetFilesWithBasePath(author.Path) ?? new List<BookFile>();
+                        var seenIds = new HashSet<int>(books.Select(f => f.Id));
+                        books.AddRange(byPath.Where(f => seenIds.Add(f.Id)));
+                    }
+
+                    foreach (var bookFile in books.Where(f => f.CalibreId == 0))
+                    {
+                        try
+                        {
+                            bookFile.CalibreId = _calibre.GetCalibreIdForPath(bookFile.Path, rootFolder.CalibreSettings);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.Debug(ex, "Could not resolve calibre id for {0}", bookFile.Path);
+                        }
+                    }
+
+                    if (books.Any())
+                    {
+                        _logger.Info("Deleting {0} files across {1} calibre books for deleted author {2}",
+                            books.Count,
+                            books.Select(f => f.CalibreId).Where(id => id > 0).Distinct().Count(),
+                            author.Name);
+                        _calibre.DeleteBooks(books, rootFolder.CalibreSettings);
+                        _mediaFileService.DeleteMany(books.Where(f => f.Id > 0).ToList(), DeleteMediaFileReason.Manual);
+                    }
                 }
             }
         }
