@@ -24,7 +24,8 @@ namespace NzbDrone.Core.Books.Calibre
         public string Comments { get; set; }
         public decimal Rating { get; set; }
         public Dictionary<string, string> Identifiers { get; set; }
-        [JsonProperty(NullValueHandling = NullValueHandling.Include)]
+        // Omitted when null: calibre-web's fetch may know the series when our own
+        // metadata does not, and an explicit null would erase it on every push.
         public string Series { get; set; }
         [JsonProperty("series_index")]
         public double? SeriesIndex { get; set; }
