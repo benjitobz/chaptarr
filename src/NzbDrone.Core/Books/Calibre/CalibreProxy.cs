@@ -255,7 +255,9 @@ namespace NzbDrone.Core.Books.Calibre
                     Cover = updateCover ? image : null,
                     PubDate = book.ReleaseDate,
                     Publisher = edition.Publisher,
-                    Languages = edition.Language.CanonicalizeLanguage(),
+                    Languages = edition.Language.CanonicalizeLanguage() is string canonicalLanguage
+                        ? new List<string> { canonicalLanguage }
+                        : null,
                     Tags = genres,
                     Comments = edition.Overview,
                     Rating = (int)(edition.Ratings.Value * 2),
