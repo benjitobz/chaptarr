@@ -315,7 +315,15 @@ namespace NzbDrone.Core.MediaFiles
                 args.Add($"--ffmpeg-threads={options.FfmpegThreads}");
             }
 
-            AddTagArguments(args, tagOptions ?? options.TagOptions);
+            var effectiveTagOptions = tagOptions ?? options.TagOptions;
+            var suppressFilenameChapters = effectiveTagOptions?.UseFilenamesAsChapters == true &&
+                                           AnySourceHasEmbeddedChapters(inputFiles);
+            if (suppressFilenameChapters)
+            {
+                _logger.Info("Source files carry embedded chapters; preserving them instead of generating one chapter per file");
+            }
+
+            AddTagArguments(args, effectiveTagOptions, suppressFilenameChapters);
 
             // Additional flags
             if (options.SkipCover)
@@ -437,7 +445,47 @@ namespace NzbDrone.Core.MediaFiles
             };
         }
 
-        private static void AddTagArguments(List<string> args, ConversionTagOptions tagOptions)
+        private bool AnySourceHasEmbeddedChapters(string[] inputFiles)
+        {
+            foreach (var inputFile in (inputFiles ?? Array.Empty<string>()).Where(f => f.IsNotNullOrWhiteSpace()))
+            {
+                var extension = (Path.GetExtension(inputFile) ?? string.Empty).ToLowerInvariant();
+                if (extension != ".m4b" && extension != ".m4a" && extension != ".mp4")
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var output = _externalTools.ExecuteFFprobe(
+                        new[]
+                        {
+                            "-v", "error",
+                            "-show_chapters",
+                            "-of", "csv=p=0",
+                            inputFile
+                        },
+                        timeoutMs: 30000);
+
+                    var chapterCount = output?
+                        .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Length ?? 0;
+
+                    if (chapterCount >= 2)
+                    {
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug(ex, "Failed to inspect embedded chapters for {0}", inputFile);
+                }
+            }
+
+            return false;
+        }
+
+        private static void AddTagArguments(List<string> args, ConversionTagOptions tagOptions, bool suppressFilenameChapters = false)
         {
             if (tagOptions == null)
             {
@@ -459,7 +507,7 @@ namespace NzbDrone.Core.MediaFiles
             AddOptionalArgument(args, "--cover", tagOptions.Cover);
             AddOptionalArgument(args, "--encoded-by", tagOptions.EncodedBy);
 
-            if (tagOptions.UseFilenamesAsChapters)
+            if (tagOptions.UseFilenamesAsChapters && !suppressFilenameChapters)
             {
                 args.Add("--use-filenames-as-chapters");
             }
