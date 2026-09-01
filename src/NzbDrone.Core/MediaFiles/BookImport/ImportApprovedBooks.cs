@@ -68,6 +68,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport
         }
 
         private readonly IMediaFileService _mediaFileService;
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<int, (int CalibreId, DateTime Added)> _recentCalibreIdsByEditionId = new System.Collections.Concurrent.ConcurrentDictionary<int, (int CalibreId, DateTime Added)>();
         private readonly IMetadataTagService _metadataTagService;
         private readonly IMediaInfoExtractor _mediaInfoExtractor;
         private readonly IAuthorService _authorService;
@@ -1331,8 +1332,41 @@ namespace NzbDrone.Core.MediaFiles.BookImport
 
                         if (calibreRoot?.IsCalibreLibrary == true && calibreRoot.CalibreSettings != null)
                         {
+                            if (bookFile.CalibreId == 0 && bookFile.EditionId > 0)
+                            {
+                                var siblingCalibreId = 0;
+                                try
+                                {
+                                    siblingCalibreId = _mediaFileService.GetFilesByBook(localBook.Book.Id)
+                                        .Where(f => f.EditionId == bookFile.EditionId && f.CalibreId > 0)
+                                        .Select(f => f.CalibreId)
+                                        .FirstOrDefault();
+                                }
+                                catch
+                                {
+                                }
+
+                                if (siblingCalibreId == 0 &&
+                                    _recentCalibreIdsByEditionId.TryGetValue(bookFile.EditionId, out var recentCalibreId) &&
+                                    recentCalibreId.Added > DateTime.UtcNow.AddMinutes(-10))
+                                {
+                                    siblingCalibreId = recentCalibreId.CalibreId;
+                                }
+
+                                if (siblingCalibreId > 0)
+                                {
+                                    _logger.Debug("[CLEAN-IMPORT] Adding {0} as another format of calibre book {1} (edition {2})", bookFile.Path, siblingCalibreId, bookFile.EditionId);
+                                    bookFile.CalibreId = siblingCalibreId;
+                                }
+                            }
+
                             var calibreSource = bookFile.Path;
                             bookFile = _calibre.AddAndConvert(bookFile, calibreRoot.CalibreSettings);
+
+                            if (bookFile.CalibreId > 0 && bookFile.EditionId > 0)
+                            {
+                                _recentCalibreIdsByEditionId[bookFile.EditionId] = (bookFile.CalibreId, DateTime.UtcNow);
+                            }
 
                             if (!copyOnly && calibreSource != bookFile.Path)
                             {
