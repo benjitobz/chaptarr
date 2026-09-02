@@ -1581,7 +1581,7 @@ namespace NzbDrone.Core.Books
             private readonly Dictionary<string, List<Book>> _booksByProviderToken;
             private readonly Dictionary<int, int> _sourceOrderByBookId;
             private readonly HashSet<int> _activeBookIds;
-            private readonly HashSet<string> _consumedStableWorkTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            private readonly Dictionary<BookMediaType, HashSet<string>> _consumedStableWorkTokensByType = new Dictionary<BookMediaType, HashSet<string>>();
 
             private BookRefreshMatchingIndex(
                 List<Book> source,
@@ -1671,7 +1671,7 @@ namespace NzbDrone.Core.Books
                 if (existingChild?.Id > 0)
                 {
                     _activeBookIds.Remove(existingChild.Id);
-                    _consumedStableWorkTokens.UnionWith(BookIdentity.GetStableWorkProviderIdentityTokens(existingChild));
+                    ConsumeStableWorkTokens(existingChild);
                 }
 
                 foreach (var child in mergedChildren ?? Enumerable.Empty<Book>())
@@ -1679,19 +1679,34 @@ namespace NzbDrone.Core.Books
                     if (child?.Id > 0)
                     {
                         _activeBookIds.Remove(child.Id);
-                        _consumedStableWorkTokens.UnionWith(BookIdentity.GetStableWorkProviderIdentityTokens(child));
+                        ConsumeStableWorkTokens(child);
                     }
                 }
             }
 
+            private void ConsumeStableWorkTokens(Book book)
+            {
+                // Work identity is tracked per media type: an audiobook row consuming a
+                // work must never block the ebook row of the same work from being added.
+                if (!_consumedStableWorkTokensByType.TryGetValue(book.MediaType, out var tokens))
+                {
+                    tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    _consumedStableWorkTokensByType[book.MediaType] = tokens;
+                }
+
+                tokens.UnionWith(BookIdentity.GetStableWorkProviderIdentityTokens(book));
+            }
+
             public bool HasConsumedStableWorkOverlap(Book remote)
             {
-                if (_consumedStableWorkTokens.Count == 0)
+                if (remote == null ||
+                    !_consumedStableWorkTokensByType.TryGetValue(remote.MediaType, out var tokens) ||
+                    tokens.Count == 0)
                 {
                     return false;
                 }
 
-                return BookIdentity.GetStableWorkProviderIdentityTokens(remote).Overlaps(_consumedStableWorkTokens);
+                return BookIdentity.GetStableWorkProviderIdentityTokens(remote).Overlaps(tokens);
             }
         }
 
