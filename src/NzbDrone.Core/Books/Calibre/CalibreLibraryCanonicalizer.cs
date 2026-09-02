@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using NLog;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Configuration;
@@ -276,9 +277,52 @@ namespace NzbDrone.Core.Books.Calibre
                 return false;
             }
 
-            _calibreProxy.SetFields(reference, settings, updateCover: true, embed: false);
+            _calibreProxy.SetFields(reference, settings, updateCover: true, embed: true);
             RefreshTrackedPaths(calibreId, files, settings);
+            RewriteOpfTitle(files, canonicalTitle);
             return true;
+        }
+
+        private void RewriteOpfTitle(List<BookFile> files, string canonicalTitle)
+        {
+            // The headless content server never refreshes calibre's per-book metadata.opf
+            // backups, and Audiobookshelf trusts those files first, so keep the title in
+            // step ourselves after a canonicalization pass.
+            var folder = files
+                .Select(f => Path.GetDirectoryName(f.Path))
+                .FirstOrDefault(d => d.IsNotNullOrWhiteSpace());
+
+            if (folder == null)
+            {
+                return;
+            }
+
+            var opfPath = Path.Combine(folder, "metadata.opf");
+
+            try
+            {
+                if (!File.Exists(opfPath))
+                {
+                    return;
+                }
+
+                var escaped = canonicalTitle
+                    .Replace("&", "&amp;")
+                    .Replace("<", "&lt;")
+                    .Replace(">", "&gt;");
+                var content = File.ReadAllText(opfPath);
+                var updated = Regex.Replace(content, "<dc:title>.*?</dc:title>", "<dc:title>" + escaped + "</dc:title>", RegexOptions.Singleline);
+
+                if (!updated.Equals(content, StringComparison.Ordinal))
+                {
+                    File.WriteAllText(opfPath, updated);
+                    _logger.Debug("Rewrote OPF title for {0}", opfPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "Unable to rewrite OPF title at {0}", opfPath);
+            }
         }
 
         private void RefreshTrackedPaths(int calibreId, List<BookFile> files, CalibreSettings settings)
