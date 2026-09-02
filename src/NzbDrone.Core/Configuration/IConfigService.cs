@@ -64,6 +64,7 @@ namespace NzbDrone.Core.Configuration
         int Retention { get; set; }
         int RssSyncInterval { get; set; }
         int MissingBookSearchInterval { get; set; }
+        bool CanonicalizeCalibreLibraryMetadata { get; set; }
         int MaximumSize { get; set; }
         int MinimumAge { get; set; }
 

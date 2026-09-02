@@ -133,6 +133,13 @@ namespace NzbDrone.Core.Configuration
             set { SetValue("MissingBookSearchInterval", value); }
         }
 
+        public bool CanonicalizeCalibreLibraryMetadata
+        {
+            get { return GetValueBoolean("CanonicalizeCalibreLibraryMetadata", true); }
+
+            set { SetValue("CanonicalizeCalibreLibraryMetadata", value); }
+        }
+
         public int MaximumSize
         {
             get { return GetValueInt("MaximumSize", 0); }
