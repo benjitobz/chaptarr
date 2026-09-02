@@ -177,6 +177,14 @@ namespace NzbDrone.Core.MediaFiles
             }
             catch (Exception e)
             {
+                if (bookFile?.Path != null && !_diskProvider.FileExistsCanonical(bookFile.Path))
+                {
+                    // Another cleanup path (such as the calibre record deletion) already
+                    // removed this file; the missing record is success, not failure.
+                    _logger.Debug(e, "Book file was already removed: {0}", bookFile.Path);
+                    return;
+                }
+
                 _logger.Error(e, "Unable to delete book file");
                 throw new NzbDroneClientException(HttpStatusCode.InternalServerError, "Unable to delete book file");
             }
