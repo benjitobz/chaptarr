@@ -139,7 +139,44 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 AddLegacyLibraryScans(author, filePath, mediaType, libraryScans);
             }
 
-            SendLibraryScans(libraryScans);
+            SendLibraryScans(libraryScans, purgeMissing: true);
+        }
+
+        public override void OnBookDelete(BookDeleteMessage deleteMessage)
+        {
+            var author = deleteMessage.Book?.Author;
+            var mediaType = deleteMessage.Book?.MediaType == BookMediaType.Audiobook ? "audiobook" : "ebook";
+
+            var libraryScans = NewLibraryScanSet();
+
+            if (Settings.HasConfiguredLibraryMappings())
+            {
+                SendMappedDelete(author, null, mediaType, libraryScans);
+            }
+            else
+            {
+                AddLegacyLibraryScans(author, null, mediaType, libraryScans);
+            }
+
+            SendLibraryScans(libraryScans, purgeMissing: true);
+        }
+
+        public override void OnAuthorDelete(AuthorDeleteMessage deleteMessage)
+        {
+            var author = deleteMessage.Author;
+            var libraryScans = NewLibraryScanSet();
+
+            if (Settings.HasConfiguredLibraryMappings())
+            {
+                SendMappedDelete(author, null, "audiobook", libraryScans);
+                SendMappedDelete(author, null, "ebook", libraryScans);
+            }
+            else
+            {
+                AddLegacyLibraryScans(author, null, null, libraryScans);
+            }
+
+            SendLibraryScans(libraryScans, purgeMissing: true);
         }
 
         // Watcher updates and scan fallbacks are sent at event time (fire and forget). Notification
@@ -222,7 +259,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             }
         }
 
-        private void SendLibraryScans(ISet<string> libraryIds)
+        private void SendLibraryScans(ISet<string> libraryIds, bool purgeMissing = false)
         {
             if (libraryIds == null || libraryIds.Count == 0)
             {
@@ -235,6 +272,18 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             {
                 try
                 {
+                    if (purgeMissing && Settings.RemoveMissingItems)
+                    {
+                        try
+                        {
+                            _proxy.RemoveItemsWithIssues(Settings, libraryId);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.Debug(ex, "Failed to remove missing items for library: {0}", libraryId);
+                        }
+                    }
+
                     _logger.Debug("Triggering AudioBookShelf scan for library: {0}", libraryId);
                     _proxy.ScanLibrary(Settings, libraryId);
                 }

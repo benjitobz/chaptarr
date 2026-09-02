@@ -68,6 +68,9 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
         public string EbookLibraryId { get; set; }
 
+        [FieldDefinition(6, Label = "Remove Missing Items After Delete", Type = FieldType.Checkbox, HelpText = "AudioBookShelf marks deleted books as missing instead of removing them. When Chaptarr deletes books or files, also remove library items whose files are gone")]
+        public bool RemoveMissingItems { get; set; }
+
         [FieldDefinition(5, Type = FieldType.Textbox, Hidden = HiddenType.Hidden)]
         public string LibraryMappingsJson { get; set; }
 

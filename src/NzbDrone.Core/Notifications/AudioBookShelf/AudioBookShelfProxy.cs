@@ -13,6 +13,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
     {
         void ScanLibrary(AudioBookShelfSettings settings);
         void ScanLibrary(AudioBookShelfSettings settings, string libraryId);
+        void RemoveItemsWithIssues(AudioBookShelfSettings settings, string libraryId);
         void UpdateWatchedPath(AudioBookShelfSettings settings, string libraryId, string path, string type, string oldPath = null);
         ValidationFailure Test(AudioBookShelfSettings settings);
         List<AudioBookShelfLibrary> GetLibraries(AudioBookShelfSettings settings);
@@ -72,6 +73,26 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
             var request = BuildRequest(settings, $"/api/libraries/{libraryId}/scan");
             request.Method = HttpMethod.Post;
+
+            var response = _httpClient.Execute(request);
+
+            if (response.HasHttpError)
+            {
+                throw new HttpException(response);
+            }
+        }
+
+        public void RemoveItemsWithIssues(AudioBookShelfSettings settings, string libraryId)
+        {
+            if (string.IsNullOrEmpty(libraryId))
+            {
+                return;
+            }
+
+            // AudioBookShelf marks deleted books as missing instead of removing them;
+            // DELETE /api/libraries/:id/issues purges items whose files are gone.
+            var request = BuildRequest(settings, $"/api/libraries/{libraryId}/issues");
+            request.Method = HttpMethod.Delete;
 
             var response = _httpClient.Execute(request);
 
