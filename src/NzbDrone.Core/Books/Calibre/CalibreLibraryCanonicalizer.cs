@@ -22,6 +22,7 @@ namespace NzbDrone.Core.Books.Calibre
         private readonly IBookService _bookService;
         private readonly IEditionService _editionService;
         private readonly IManageCommandQueue _commandQueueManager;
+        private readonly IEventAggregator _eventAggregator;
         private readonly IMediaFileService _mediaFileService;
         private readonly ICalibreProxy _calibreProxy;
         private readonly IConfigService _configService;
@@ -32,6 +33,7 @@ namespace NzbDrone.Core.Books.Calibre
                                            IBookService bookService,
                                            IEditionService editionService,
                                            IManageCommandQueue commandQueueManager,
+                                           IEventAggregator eventAggregator,
                                            IMediaFileService mediaFileService,
                                            ICalibreProxy calibreProxy,
                                            IConfigService configService,
@@ -42,6 +44,7 @@ namespace NzbDrone.Core.Books.Calibre
             _bookService = bookService;
             _editionService = editionService;
             _commandQueueManager = commandQueueManager;
+            _eventAggregator = eventAggregator;
             _mediaFileService = mediaFileService;
             _calibreProxy = calibreProxy;
             _configService = configService;
@@ -220,12 +223,13 @@ namespace NzbDrone.Core.Books.Calibre
             }
 
             var canonicalized = 0;
+            var renamedFiles = new List<RenamedBookFile>();
 
             foreach (var pair in groups)
             {
                 try
                 {
-                    if (CanonicalizeBook(pair.Key, pair.Value, settings))
+                    if (CanonicalizeBook(pair.Key, pair.Value, settings, renamedFiles))
                     {
                         canonicalized++;
                     }
@@ -236,10 +240,18 @@ namespace NzbDrone.Core.Books.Calibre
                 }
             }
 
+            if (renamedFiles.Any())
+            {
+                // Calibre renamed folders and files during the stamp; announce it like any
+                // other rename so connections (e.g. AudioBookShelf) track the move instead
+                // of seeing a vanished folder plus an unrelated new one.
+                _eventAggregator.PublishEvent(new AuthorRenamedEvent(author, renamedFiles));
+            }
+
             return canonicalized;
         }
 
-        private bool CanonicalizeBook(int calibreId, List<BookFile> files, CalibreSettings settings)
+        private bool CanonicalizeBook(int calibreId, List<BookFile> files, CalibreSettings settings, List<RenamedBookFile> renamedFiles)
         {
             var reference = files.FirstOrDefault(f => f.Edition?.Title.IsNotNullOrWhiteSpace() == true);
 
@@ -278,7 +290,7 @@ namespace NzbDrone.Core.Books.Calibre
             }
 
             _calibreProxy.SetFields(reference, settings, updateCover: true, embed: true);
-            RefreshTrackedPaths(calibreId, files, settings);
+            RefreshTrackedPaths(calibreId, files, settings, renamedFiles);
             RewriteOpfTitle(files, canonicalTitle);
             return true;
         }
@@ -325,7 +337,7 @@ namespace NzbDrone.Core.Books.Calibre
             }
         }
 
-        private void RefreshTrackedPaths(int calibreId, List<BookFile> files, CalibreSettings settings)
+        private void RefreshTrackedPaths(int calibreId, List<BookFile> files, CalibreSettings settings, List<RenamedBookFile> renamedFiles)
         {
             var refreshed = _calibreProxy.GetBook(calibreId, settings);
             var formats = refreshed?.Formats;
@@ -360,12 +372,14 @@ namespace NzbDrone.Core.Books.Calibre
                     continue;
                 }
 
+                var previousPath = file.Path;
                 file.Path = format.Path;
 
                 try
                 {
                     _mediaFileService.Update(file);
                     updatedCount++;
+                    renamedFiles.Add(new RenamedBookFile { BookFile = file, PreviousPath = previousPath });
                 }
                 catch (Exception ex)
                 {
