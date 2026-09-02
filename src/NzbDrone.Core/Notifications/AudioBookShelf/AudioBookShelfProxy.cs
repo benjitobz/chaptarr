@@ -16,6 +16,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
         void RemoveItemsWithIssues(AudioBookShelfSettings settings, string libraryId);
         List<AudioBookShelfLibraryItemSummary> GetLibraryItems(AudioBookShelfSettings settings, string libraryId);
         void ScanItem(AudioBookShelfSettings settings, string itemId);
+        void UpdateItemTitle(AudioBookShelfSettings settings, string itemId, string title);
         void UpdateWatchedPath(AudioBookShelfSettings settings, string libraryId, string path, string type, string oldPath = null);
         ValidationFailure Test(AudioBookShelfSettings settings);
         List<AudioBookShelfLibrary> GetLibraries(AudioBookShelfSettings settings);
@@ -224,6 +225,28 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
             var request = BuildRequest(settings, $"/api/items/{itemId}/scan");
             request.Method = HttpMethod.Post;
+
+            var response = _httpClient.Execute(request);
+
+            if (response.HasHttpError)
+            {
+                throw new HttpException(response);
+            }
+        }
+
+        public void UpdateItemTitle(AudioBookShelfSettings settings, string itemId, string title)
+        {
+            if (string.IsNullOrEmpty(itemId) || string.IsNullOrEmpty(title))
+            {
+                return;
+            }
+
+            // Item rescans deliberately keep existing metadata, so push the canonical
+            // title straight into the item instead of hoping a re-read wins.
+            var request = BuildRequest(settings, $"/api/items/{itemId}/media");
+            request.Method = HttpMethod.Patch;
+            request.Headers.ContentType = "application/json";
+            request.SetContent(Json.ToJson(new { metadata = new { title } }));
 
             var response = _httpClient.Execute(request);
 

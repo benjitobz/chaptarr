@@ -277,13 +277,38 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 return;
             }
 
-            var newFolders = renamedFiles
-                .Select(f => f?.BookFile?.Path)
-                .Where(p => p.IsNotNullOrWhiteSpace())
-                .Select(p => Path.GetDirectoryName(p))
-                .Where(d => d.IsNotNullOrWhiteSpace())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var folderTitles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var renamed in renamedFiles)
+            {
+                var path = renamed?.BookFile?.Path;
+
+                if (path.IsNullOrWhiteSpace())
+                {
+                    continue;
+                }
+
+                var folder = Path.GetDirectoryName(path);
+
+                if (folder.IsNullOrWhiteSpace() || folderTitles.ContainsKey(folder))
+                {
+                    continue;
+                }
+
+                string title = null;
+
+                try
+                {
+                    title = renamed.BookFile.Edition?.Title;
+                }
+                catch
+                {
+                }
+
+                folderTitles[folder] = title;
+            }
+
+            var newFolders = folderTitles.Keys.ToList();
 
             var mappings = Settings.GetLibraryMappings();
 
@@ -329,6 +354,14 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                             if (item == null)
                             {
                                 continue;
+                            }
+
+                            var canonicalTitle = folderTitles.TryGetValue(folder, out var t) ? t : null;
+
+                            if (!string.IsNullOrEmpty(canonicalTitle))
+                            {
+                                proxy.UpdateItemTitle(settings, item.Id, canonicalTitle);
+                                logger.Debug("AudioBookShelf: set item title '{0}' for '{1}'", canonicalTitle, rel);
                             }
 
                             proxy.ScanItem(settings, item.Id);
