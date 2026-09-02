@@ -1911,6 +1911,8 @@ namespace NzbDrone.Core.Books
                 }
             }
 
+            var deletionExclusions = _importListExclusionService.All();
+
             foreach (var book in children.Added)
             {
                 // Store original narrator for logging
@@ -1927,6 +1929,21 @@ namespace NzbDrone.Core.Books
                 {
                     audioMonitor = fallbackAudioMonitor ?? false;
                     ebookMonitor = fallbackEbookMonitor ?? false;
+                }
+
+                if ((audioMonitor || ebookMonitor) && deletionExclusions.Count > 0)
+                {
+                    var providerIds = new HashSet<string>(ImportListExclusionBookMatcher.GetCanonicalProviderIds(book), StringComparer.OrdinalIgnoreCase);
+
+                    if (providerIds.Count > 0 &&
+                        deletionExclusions.Any(e => providerIds.Contains(e.ForeignId) && (!e.MediaType.HasValue || e.MediaType == book.MediaType)))
+                    {
+                        // The user deleted this book with an import list exclusion;
+                        // recreate the catalog row unmonitored so it stays gone.
+                        audioMonitor = false;
+                        ebookMonitor = false;
+                        _logger.Debug("[MONITORING-REFRESH] '{0}' was previously deleted with an exclusion; recreating unmonitored", book.Title);
+                    }
                 }
 
                 // Set monitoring flags (metadata profile filtering will happen after insertion)
