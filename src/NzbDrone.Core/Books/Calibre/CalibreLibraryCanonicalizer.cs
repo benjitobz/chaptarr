@@ -16,7 +16,7 @@ using NzbDrone.Core.RootFolders;
 
 namespace NzbDrone.Core.Books.Calibre
 {
-    public class CalibreLibraryCanonicalizer : IHandle<AuthorScannedEvent>, IHandle<BookFileAddedEvent>, IExecute<CanonicalizeCalibreLibraryCommand>, IExecute<CanonicalizeCalibreBookCommand>
+    public class CalibreLibraryCanonicalizer : IHandle<AuthorScannedEvent>, IHandle<BookFileAddedEvent>, IExecute<CanonicalizeCalibreLibraryCommand>, IExecute<CanonicalizeCalibreBookCommand>, IHandle<MediaCoversUpdatedEvent>
     {
         private readonly IRootFolderService _rootFolderService;
         private readonly IAuthorService _authorService;
@@ -125,6 +125,38 @@ namespace NzbDrone.Core.Books.Calibre
             if (currentFiles.Any())
             {
                 _eventAggregator.PublishEvent(new AuthorRenamedEvent(author, currentFiles));
+            }
+        }
+
+        public void Handle(MediaCoversUpdatedEvent message)
+        {
+            if (!_configService.CanonicalizeCalibreLibraryMetadata)
+            {
+                return;
+            }
+
+            // Freshly downloaded artwork flows outward without waiting for a manual
+            // push: the forced per-book stamp carries it into calibre and on to the
+            // rename-following consumers.
+            if (message.Book != null && message.Book.Id > 0)
+            {
+                _commandQueueManager.Push(new CanonicalizeCalibreBookCommand { BookId = message.Book.Id });
+                return;
+            }
+
+            var author = message.Author;
+
+            if (author == null || author.Id <= 0)
+            {
+                return;
+            }
+
+            foreach (var book in _bookService.GetBooksByAuthor(author.Id))
+            {
+                if (book != null && book.Id > 0 && _mediaFileService.GetFilesByBook(book.Id).Any())
+                {
+                    _commandQueueManager.Push(new CanonicalizeCalibreBookCommand { BookId = book.Id });
+                }
             }
         }
 
