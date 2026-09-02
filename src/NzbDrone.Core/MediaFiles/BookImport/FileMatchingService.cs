@@ -5604,6 +5604,8 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 "set", "sets", "collection", "collections", "boxset", "boxed", "bundle", "omnibus", "trilogy", "duology", "sampler", "esampler", "books"
             };
 
+            private static readonly char[] TitleTokenTrimChars = { '.', '-', ':', ';', ',', '!', '?', '(', ')', '[', ']', '"' };
+
             private static readonly HashSet<string> TitleComparisonStopTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 "the", "a", "an", "of", "and", "or", "in", "on", "at", "to", "for", "with", "by", "from", "is",
@@ -5628,10 +5630,10 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                     !TitleComparisonStopTokens.Contains(token) &&
                     !SeriesPositionTokenHelper.LooksLikeRomanNumeralToken(token);
 
-                var querySet = new HashSet<string>(queryTokens.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim('.', '-')), StringComparer.OrdinalIgnoreCase);
-                var candidateTokens = SplitTokens(title).Select(t => t.Trim('.', '-')).Where(t => t.Length > 0).ToList();
+                var querySet = new HashSet<string>(queryTokens.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim(TitleTokenTrimChars)), StringComparer.OrdinalIgnoreCase);
+                var candidateTokens = SplitTokens(title).Select(t => t.Trim(TitleTokenTrimChars)).Where(t => t.Length > 0).ToList();
                 var candidateSet = new HashSet<string>(candidateTokens, StringComparer.OrdinalIgnoreCase);
-                var authorSet = new HashSet<string>(SplitTokens(winner.AuthorName ?? string.Empty).Select(t => t.Trim('.', '-')), StringComparer.OrdinalIgnoreCase);
+                var authorSet = new HashSet<string>(SplitTokens(winner.AuthorName ?? string.Empty).Select(t => t.Trim(TitleTokenTrimChars)), StringComparer.OrdinalIgnoreCase);
 
                 candidateWord = candidateTokens.FirstOrDefault(t => Meaningful(t) && !querySet.Contains(t));
                 if (candidateWord == null)
@@ -5696,7 +5698,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport
 
                 foreach (var token in SplitTokens(title))
                 {
-                    var trimmed = token.Trim('.', '-');
+                    var trimmed = token.Trim(TitleTokenTrimChars);
                     if (trimmed.Length == 0 || queryTokenSet.Contains(token) || queryTokenSet.Contains(trimmed))
                     {
                         continue;
