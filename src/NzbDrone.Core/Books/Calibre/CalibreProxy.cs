@@ -239,7 +239,7 @@ namespace NzbDrone.Core.Books.Calibre
                     var imageData = File.ReadAllBytes(imageFile);
                     if (CalibreImageValidator.IsValidImage(imageData))
                     {
-                        image = Convert.ToBase64String(imageData);
+                        image = Convert.ToBase64String(CalibreCoverNormalizer.Normalize(imageData));
                     }
                 }
             }
