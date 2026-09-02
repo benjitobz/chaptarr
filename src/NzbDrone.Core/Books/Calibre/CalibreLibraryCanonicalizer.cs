@@ -150,7 +150,17 @@ namespace NzbDrone.Core.Books.Calibre
             var authorMatches = canonicalAuthor.IsNullOrWhiteSpace() ||
                                 (calibreBook.Authors?.Any(a => a.Equals(canonicalAuthor, StringComparison.OrdinalIgnoreCase)) ?? false);
 
-            if (titleMatches && authorMatches)
+            var book = reference.Edition.Book;
+            var chosenSeries = CalibreSeriesSelector.Select(book)?.Series.Value.Title;
+            var calibreSeries = calibreBook.Series;
+
+            // Re-stamp a series only when calibre still holds one of this book's own
+            // provider series; an unrecognized name is a manual edit and stays untouched.
+            var seriesNeedsStamp = chosenSeries.IsNotNullOrWhiteSpace() &&
+                                   !chosenSeries.Equals(calibreSeries ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
+                                   (calibreSeries.IsNullOrWhiteSpace() || CalibreSeriesSelector.KnownSeriesTitles(book).Contains(calibreSeries));
+
+            if (titleMatches && authorMatches && !seriesNeedsStamp)
             {
                 return false;
             }

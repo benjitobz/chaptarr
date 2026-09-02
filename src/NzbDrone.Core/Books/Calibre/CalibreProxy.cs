@@ -214,7 +214,7 @@ namespace NzbDrone.Core.Books.Calibre
         {
             var edition = file.Edition;
             var book = edition.Book;
-            var serieslink = book.SeriesLinks.OrderBy(x => x.SeriesPosition).FirstOrDefault(x => x.Series.Value.Title.IsNotNullOrWhiteSpace());
+            var serieslink = CalibreSeriesSelector.Select(book);
 
             var series = serieslink?.Series.Value;
             double? seriesIndex = null;
