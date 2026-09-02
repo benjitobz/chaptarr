@@ -118,6 +118,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             // A rename retires the old folder identity; sweep whatever the move left
             // flagged so canonicalization renames do not strand ghost items.
             SchedulePurgeForDelete(libraryScans);
+            ScheduleItemRescans(renamedFiles);
         }
 
         public override void OnBookFileDelete(BookFileDeleteMessage deleteMessage)
@@ -265,6 +266,81 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 _logger.Debug(ex, "Failed to send AudioBookShelf watcher update for library '{0}', falling back to full scan", target.LibraryId);
                 libraryScans.Add(target.LibraryId);
             }
+        }
+
+        private void ScheduleItemRescans(List<RenamedBookFile> renamedFiles)
+        {
+            // A tracked move keeps the item's old metadata; ask AudioBookShelf to
+            // rescan the affected items so it re-reads the canonical OPF.
+            if (renamedFiles == null || renamedFiles.Count == 0)
+            {
+                return;
+            }
+
+            var newFolders = renamedFiles
+                .Select(f => f?.BookFile?.Path)
+                .Where(p => p.IsNotNullOrWhiteSpace())
+                .Select(p => Path.GetDirectoryName(p))
+                .Where(d => d.IsNotNullOrWhiteSpace())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var mappings = Settings.GetLibraryMappings();
+
+            if (!newFolders.Any() || mappings.Count == 0)
+            {
+                return;
+            }
+
+            var settings = Settings;
+            var proxy = _proxy;
+            var logger = _logger;
+            var rootFolderService = _rootFolderService;
+
+            Task.Delay(TimeSpan.FromSeconds(45)).ContinueWith(_ =>
+            {
+                try
+                {
+                    foreach (var libraryId in mappings.Select(m => m?.LibraryId).Where(id => !string.IsNullOrEmpty(id)).Distinct(StringComparer.OrdinalIgnoreCase))
+                    {
+                        var items = proxy.GetLibraryItems(settings, libraryId);
+
+                        foreach (var folder in newFolders)
+                        {
+                            RootFolder rootFolder;
+
+                            try
+                            {
+                                rootFolder = rootFolderService.GetBestRootFolder(folder);
+                            }
+                            catch
+                            {
+                                continue;
+                            }
+
+                            if (rootFolder?.Path == null)
+                            {
+                                continue;
+                            }
+
+                            var rel = folder.Substring(rootFolder.Path.TrimEnd('/').Length).TrimStart('/');
+                            var item = items.FirstOrDefault(i => string.Equals(i.RelPath, rel, StringComparison.OrdinalIgnoreCase));
+
+                            if (item == null)
+                            {
+                                continue;
+                            }
+
+                            proxy.ScanItem(settings, item.Id);
+                            logger.Debug("AudioBookShelf: requested item rescan for '{0}'", rel);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.Debug(ex, "AudioBookShelf: item rescan after rename failed");
+                }
+            });
         }
 
         private void SchedulePurgeForDelete(ISet<string> libraryScans)
