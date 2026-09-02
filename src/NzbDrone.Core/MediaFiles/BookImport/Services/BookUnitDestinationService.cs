@@ -175,6 +175,21 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                 return dest1;
             }
 
+            // Sibling ebook formats of one release (epub/azw3/mobi in the same folder) are
+            // renditions of the same physical unit, never a second copy to clone for.
+            if (canonicalBook.MediaType == BookMediaType.Ebook)
+            {
+                var incomingBaseKey = StripUnitKeyExtension(unitKey);
+
+                if (!string.IsNullOrWhiteSpace(incomingBaseKey) &&
+                    existingKeys.Any(k => StripUnitKeyExtension(k).Equals(incomingBaseKey, StringComparison.OrdinalIgnoreCase)))
+                {
+                    var destSibling = (canonicalBook.Id, canonicalEdition.Id);
+                    if (!string.IsNullOrWhiteSpace(cacheKey)) _unitDestCache[cacheKey] = destSibling;
+                    return destSibling;
+                }
+            }
+
             // Clone book + chosen edition for this unit
             var clone = CloneBookAndEdition(canonicalBook, canonicalEdition, unitKeyHash, makeAutomaticCopy: false);
             _logger.Debug("[UNIT-CLONE] Created duplicate BookId={0} EditionId={1} for unitKey='{2}' from canonical BookId={3} EditionId={4}",
@@ -192,6 +207,23 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             }
 
             return $"{canonicalBook.Id}|{unitKeyOrHash}".ToLowerInvariant();
+        }
+
+        private static string StripUnitKeyExtension(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return key ?? string.Empty;
+            }
+
+            var idx = key.LastIndexOf('|');
+
+            if (idx <= 0 || idx == key.Length - 1)
+            {
+                return key;
+            }
+
+            return key[idx + 1] == '.' ? key.Substring(0, idx) : key;
         }
 
         private static string ComputeUnitKeyHash(string unitKey)
@@ -238,7 +270,11 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                 foreach (var f in files)
                 {
                     var key = BuildRootUnitKeyWithExtension(f.Path, canonicalEdition.Title, canonicalBook.MediaType);
-                    if (!string.Equals(key, unitKey, StringComparison.OrdinalIgnoreCase))
+                    var sameUnit = string.Equals(key, unitKey, StringComparison.OrdinalIgnoreCase) ||
+                                   (canonicalBook.MediaType == BookMediaType.Ebook &&
+                                    StripUnitKeyExtension(key).Equals(StripUnitKeyExtension(unitKey), StringComparison.OrdinalIgnoreCase));
+
+                    if (!sameUnit)
                     {
                         continue;
                     }
