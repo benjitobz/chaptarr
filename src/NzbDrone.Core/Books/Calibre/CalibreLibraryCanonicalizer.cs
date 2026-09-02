@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using NLog;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Configuration;
+using NzbDrone.Core.MediaCover;
 using NzbDrone.Core.MediaFiles;
 using NzbDrone.Core.MediaFiles.Events;
 using NzbDrone.Core.Authors;
@@ -23,6 +24,7 @@ namespace NzbDrone.Core.Books.Calibre
         private readonly IEditionService _editionService;
         private readonly IManageCommandQueue _commandQueueManager;
         private readonly IEventAggregator _eventAggregator;
+        private readonly IMapCoversToLocal _mediaCoverService2;
         private readonly IMediaFileService _mediaFileService;
         private readonly ICalibreProxy _calibreProxy;
         private readonly IConfigService _configService;
@@ -34,6 +36,7 @@ namespace NzbDrone.Core.Books.Calibre
                                            IEditionService editionService,
                                            IManageCommandQueue commandQueueManager,
                                            IEventAggregator eventAggregator,
+                                           IMapCoversToLocal coverMapper,
                                            IMediaFileService mediaFileService,
                                            ICalibreProxy calibreProxy,
                                            IConfigService configService,
@@ -45,6 +48,7 @@ namespace NzbDrone.Core.Books.Calibre
             _editionService = editionService;
             _commandQueueManager = commandQueueManager;
             _eventAggregator = eventAggregator;
+            _mediaCoverService2 = coverMapper;
             _mediaFileService = mediaFileService;
             _calibreProxy = calibreProxy;
             _configService = configService;
@@ -91,6 +95,17 @@ namespace NzbDrone.Core.Books.Calibre
             var files = _mediaFileService.GetFilesByBook(book.Id)
                 .Where(f => f != null && f.Path.IsNotNullOrWhiteSpace())
                 .ToList();
+
+            try
+            {
+                // A row recreated shortly before canonicalizing may not have its cover
+                // cached yet, and the stamp can only embed a cover it has locally.
+                _mediaCoverService2.EnsureBookCovers(book);
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "Unable to fetch covers for {0} before canonicalizing", book.Title);
+            }
 
             var canonicalized = ProcessFiles(author, settings, files, force: true);
 
