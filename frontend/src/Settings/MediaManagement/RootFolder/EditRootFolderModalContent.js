@@ -174,6 +174,7 @@ class EditRootFolderModalContent extends Component {
       placeEbooksWithAudiobooks,
       defaultSyncMonitoredAcrossFormats,
       isCalibreLibrary,
+      canonicalizeCalibreMetadata,
       host,
       port,
       urlBase,
@@ -650,6 +651,20 @@ class EditRootFolderModalContent extends Component {
                       {
                         isCalibreLibrary?.value &&
                           <div>
+                            <FormGroup>
+                              <FormLabel>
+                                {translate('CanonicalizeCalibreMetadata')}
+                              </FormLabel>
+
+                              <FormInputGroup
+                                type={inputTypes.CHECK}
+                                name="canonicalizeCalibreMetadata"
+                                helpText={translate('CanonicalizeCalibreMetadataHelpText')}
+                                {...canonicalizeCalibreMetadata}
+                                onChange={onInputChange}
+                              />
+                            </FormGroup>
+
                             <FormGroup>
                               <FormLabel>
                                 {translate('CalibreHost')}

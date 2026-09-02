@@ -59,6 +59,11 @@ namespace NzbDrone.Core.Books.Calibre
                 return;
             }
 
+            if (!rootFolder.CanonicalizeCalibreMetadata)
+            {
+                return;
+            }
+
             var settings = rootFolder.CalibreSettings;
             var files = _mediaFileService.GetFilesByAuthor(author.Id)
                 .Where(f => f != null && f.Path.IsNotNullOrWhiteSpace())
