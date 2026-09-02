@@ -318,6 +318,7 @@
   "CalibreContentServerText": "Using a Calibre Content Server (not Calibre Web) allows Chaptarr to add books to your Calibre library and trigger conversions between formats",
   "CanonicalizeCalibreMetadata": "Canonicalize Metadata",
   "CanonicalizeCalibreMetadataHelpText": "Allow Chaptarr to rewrite books picked up from this library with its canonical metadata (title, author, series, cover). Disable if only the calibre content server\u0027s application (i.e. Calibre-Web) will be performing metadata changes",
+  "CanonicalizeMetadataToCalibre": "Canonicalize Metadata to Calibre",
   "CalibreHost": "Calibre Host",
   "CalibreHostHelpText": "Calibre content server host",
   "CalibreLibrary": "Calibre Library",

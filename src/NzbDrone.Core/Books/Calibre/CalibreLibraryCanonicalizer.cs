@@ -14,10 +14,12 @@ using NzbDrone.Core.RootFolders;
 
 namespace NzbDrone.Core.Books.Calibre
 {
-    public class CalibreLibraryCanonicalizer : IHandle<AuthorScannedEvent>, IHandle<BookFileAddedEvent>, IExecute<CanonicalizeCalibreLibraryCommand>
+    public class CalibreLibraryCanonicalizer : IHandle<AuthorScannedEvent>, IHandle<BookFileAddedEvent>, IExecute<CanonicalizeCalibreLibraryCommand>, IExecute<CanonicalizeCalibreBookCommand>
     {
         private readonly IRootFolderService _rootFolderService;
         private readonly IAuthorService _authorService;
+        private readonly IBookService _bookService;
+        private readonly IEditionService _editionService;
         private readonly IManageCommandQueue _commandQueueManager;
         private readonly IMediaFileService _mediaFileService;
         private readonly ICalibreProxy _calibreProxy;
@@ -26,6 +28,8 @@ namespace NzbDrone.Core.Books.Calibre
 
         public CalibreLibraryCanonicalizer(IRootFolderService rootFolderService,
                                            IAuthorService authorService,
+                                           IBookService bookService,
+                                           IEditionService editionService,
                                            IManageCommandQueue commandQueueManager,
                                            IMediaFileService mediaFileService,
                                            ICalibreProxy calibreProxy,
@@ -34,6 +38,8 @@ namespace NzbDrone.Core.Books.Calibre
         {
             _rootFolderService = rootFolderService;
             _authorService = authorService;
+            _bookService = bookService;
+            _editionService = editionService;
             _commandQueueManager = commandQueueManager;
             _mediaFileService = mediaFileService;
             _calibreProxy = calibreProxy;
@@ -48,33 +54,100 @@ namespace NzbDrone.Core.Books.Calibre
 
         public void Execute(CanonicalizeCalibreLibraryCommand message)
         {
-            CanonicalizeAuthor(_authorService.GetAuthor(message.AuthorId));
+            Author author;
+
+            try
+            {
+                author = _authorService.GetAuthor(message.AuthorId);
+            }
+            catch (Exception)
+            {
+                return;
+            }
+
+            CanonicalizeAuthor(author);
+        }
+
+        public void Execute(CanonicalizeCalibreBookCommand message)
+        {
+            var book = _bookService.GetBook(message.BookId);
+
+            if (book == null)
+            {
+                return;
+            }
+
+            var author = _authorService.GetAuthor(book.AuthorId);
+
+            if (author == null || !TryGetCalibreRootFolder(author, out var settings))
+            {
+                return;
+            }
+
+            var files = _mediaFileService.GetFilesByBook(book.Id)
+                .Where(f => f != null && f.Path.IsNotNullOrWhiteSpace())
+                .ToList();
+
+            var canonicalized = ProcessFiles(author, settings, files);
+
+            if (canonicalized > 0)
+            {
+                _logger.Info("Canonicalized calibre metadata for '{0}'", book.Title);
+            }
         }
 
         public void Handle(BookFileAddedEvent message)
         {
             // Ingest attaches can land without a trailing author scan, so queue a
-            // deduplicated canonicalize pass that runs once the import work drains.
+            // canonicalize pass per book; per-book scoping keeps a late-attaching
+            // sibling from being swallowed by the dedupe of an in-flight author pass.
             if (!_configService.CanonicalizeCalibreLibraryMetadata)
             {
                 return;
             }
 
-            var authorId = message.BookFile?.Author?.Id ?? 0;
+            var bookFile = message.BookFile;
+            var book = bookFile?.Edition?.Book;
 
-            if (authorId <= 0)
+            if (book == null && bookFile != null && bookFile.EditionId > 0)
+            {
+                book = _editionService.GetEdition(bookFile.EditionId)?.Book;
+            }
+
+            if (book == null || book.Id <= 0)
             {
                 return;
             }
 
-            _commandQueueManager.Push(new CanonicalizeCalibreLibraryCommand { AuthorId = authorId });
+            _commandQueueManager.Push(new CanonicalizeCalibreBookCommand { BookId = book.Id });
         }
 
         private void CanonicalizeAuthor(Author author)
         {
-            if (author == null || author.Path.IsNullOrWhiteSpace() || !_configService.CanonicalizeCalibreLibraryMetadata)
+            if (author == null || !TryGetCalibreRootFolder(author, out var settings))
             {
                 return;
+            }
+
+            var files = _mediaFileService.GetFilesByAuthor(author.Id)
+                .Where(f => f != null && f.Path.IsNotNullOrWhiteSpace())
+                .ToList();
+
+            var canonicalized = ProcessFiles(author, settings, files);
+
+            if (canonicalized > 0)
+            {
+                _logger.Info("Canonicalized calibre metadata for {0} book(s) under {1}", canonicalized, author.Name);
+            }
+        }
+
+        private bool TryGetCalibreRootFolder(Author author, out CalibreSettings settings)
+        {
+            settings = null;
+
+            if (author.Path.IsNullOrWhiteSpace() || !_configService.CanonicalizeCalibreLibraryMetadata)
+            {
+                return false;
             }
 
             RootFolder rootFolder;
@@ -86,27 +159,28 @@ namespace NzbDrone.Core.Books.Calibre
             catch (Exception ex)
             {
                 _logger.Debug(ex, "Unable to resolve root folder for {0}", author.Path);
-                return;
+                return false;
             }
 
             if (rootFolder == null || !rootFolder.IsCalibreLibrary || rootFolder.CalibreSettings == null)
             {
-                return;
+                return false;
             }
 
             if (!rootFolder.CanonicalizeCalibreMetadata)
             {
-                return;
+                return false;
             }
 
-            var settings = rootFolder.CalibreSettings;
-            var files = _mediaFileService.GetFilesByAuthor(author.Id)
-                .Where(f => f != null && f.Path.IsNotNullOrWhiteSpace())
-                .ToList();
+            settings = rootFolder.CalibreSettings;
+            return true;
+        }
 
+        private int ProcessFiles(Author author, CalibreSettings settings, List<BookFile> files)
+        {
             if (!files.Any())
             {
-                return;
+                return 0;
             }
 
             var groups = new Dictionary<int, List<BookFile>>();
@@ -161,10 +235,7 @@ namespace NzbDrone.Core.Books.Calibre
                 }
             }
 
-            if (canonicalized > 0)
-            {
-                _logger.Info("Canonicalized calibre metadata for {0} book(s) under {1}", canonicalized, author.Name);
-            }
+            return canonicalized;
         }
 
         private bool CanonicalizeBook(int calibreId, List<BookFile> files, CalibreSettings settings)
