@@ -364,6 +364,30 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                                 logger.Debug("AudioBookShelf: set item title '{0}' for '{1}'", canonicalTitle, rel);
                             }
 
+                            var localCover = Path.Combine(folder, "cover.jpg");
+
+                            if (File.Exists(localCover))
+                            {
+                                var mapping = mappings.FirstOrDefault(m =>
+                                    string.Equals(m?.LibraryId, libraryId, StringComparison.OrdinalIgnoreCase) &&
+                                    m.LibraryFolderPath.IsNotNullOrWhiteSpace());
+
+                                if (mapping != null)
+                                {
+                                    var remoteCover = mapping.LibraryFolderPath.TrimEnd('/') + "/" + rel + "/cover.jpg";
+
+                                    try
+                                    {
+                                        proxy.UpdateItemCover(settings, item.Id, remoteCover);
+                                        logger.Debug("AudioBookShelf: set item cover from '{0}'", remoteCover);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        logger.Debug(ex, "AudioBookShelf: cover update failed for '{0}'", rel);
+                                    }
+                                }
+                            }
+
                             proxy.ScanItem(settings, item.Id);
                             logger.Debug("AudioBookShelf: requested item rescan for '{0}'", rel);
                         }

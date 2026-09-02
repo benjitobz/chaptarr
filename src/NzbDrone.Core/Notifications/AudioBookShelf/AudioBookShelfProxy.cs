@@ -17,6 +17,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
         List<AudioBookShelfLibraryItemSummary> GetLibraryItems(AudioBookShelfSettings settings, string libraryId);
         void ScanItem(AudioBookShelfSettings settings, string itemId);
         void UpdateItemTitle(AudioBookShelfSettings settings, string itemId, string title);
+        void UpdateItemCover(AudioBookShelfSettings settings, string itemId, string coverPath);
         void UpdateWatchedPath(AudioBookShelfSettings settings, string libraryId, string path, string type, string oldPath = null);
         ValidationFailure Test(AudioBookShelfSettings settings);
         List<AudioBookShelfLibrary> GetLibraries(AudioBookShelfSettings settings);
@@ -247,6 +248,28 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             request.Method = HttpMethod.Patch;
             request.Headers.ContentType = "application/json";
             request.SetContent(Json.ToJson(new { metadata = new { title } }));
+
+            var response = _httpClient.Execute(request);
+
+            if (response.HasHttpError)
+            {
+                throw new HttpException(response);
+            }
+        }
+
+        public void UpdateItemCover(AudioBookShelfSettings settings, string itemId, string coverPath)
+        {
+            if (string.IsNullOrEmpty(itemId) || string.IsNullOrEmpty(coverPath))
+            {
+                return;
+            }
+
+            // AudioBookShelf keeps a private copy of an item's cover and never replaces
+            // it from folder changes; point it at the canonical cover explicitly.
+            var request = BuildRequest(settings, $"/api/items/{itemId}/cover");
+            request.Method = HttpMethod.Patch;
+            request.Headers.ContentType = "application/json";
+            request.SetContent(Json.ToJson(new { cover = coverPath }));
 
             var response = _httpClient.Execute(request);
 
