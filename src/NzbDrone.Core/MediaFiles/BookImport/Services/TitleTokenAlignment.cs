@@ -34,6 +34,12 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             "a", "an", "the"
         };
 
+        private static readonly HashSet<string> VolumeMarkerGapTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "part", "book", "volume", "vol", "no",
+            "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"
+        };
+
         public static bool IsStructuralGlueToken(string token)
         {
             return !string.IsNullOrWhiteSpace(token) && StructuralGlueTokens.Contains(token.Trim());
@@ -44,6 +50,17 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             IReadOnlyList<string> fieldTokens,
             bool allowNearExact,
             bool allowTransposition,
+            out TitleTokenAlignmentResult result)
+        {
+            return TryAlignStructural(requiredTokens, fieldTokens, allowNearExact, allowTransposition, allowVolumeMarkerGaps: false, out result);
+        }
+
+        public static bool TryAlignStructural(
+            IReadOnlyList<string> requiredTokens,
+            IReadOnlyList<string> fieldTokens,
+            bool allowNearExact,
+            bool allowTransposition,
+            bool allowVolumeMarkerGaps,
             out TitleTokenAlignmentResult result)
         {
             result = null;
@@ -90,7 +107,9 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             var last = result.ConsumedFieldIndexes.Max();
             for (var index = first + 1; index < last; index++)
             {
-                if (!consumed.Contains(index) && !IsStructuralGlueToken(fieldTokens[index]))
+                if (!consumed.Contains(index) &&
+                    !IsStructuralGlueToken(fieldTokens[index]) &&
+                    !(allowVolumeMarkerGaps && IsVolumeMarkerGapToken(fieldTokens[index])))
                 {
                     result = null;
                     return false;
@@ -98,6 +117,18 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             }
 
             return true;
+        }
+
+        private static bool IsVolumeMarkerGapToken(string token)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return false;
+            }
+
+            var trimmed = token.Trim();
+
+            return trimmed.All(char.IsDigit) || VolumeMarkerGapTokens.Contains(trimmed);
         }
 
         public static bool TokensMatchExactOrSynonym(string requiredToken, string fieldToken)
