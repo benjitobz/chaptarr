@@ -7,26 +7,34 @@ using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Configuration;
 using NzbDrone.Core.MediaFiles;
 using NzbDrone.Core.MediaFiles.Events;
+using NzbDrone.Core.Authors;
+using NzbDrone.Core.Messaging.Commands;
 using NzbDrone.Core.Messaging.Events;
 using NzbDrone.Core.RootFolders;
 
 namespace NzbDrone.Core.Books.Calibre
 {
-    public class CalibreLibraryCanonicalizer : IHandle<AuthorScannedEvent>
+    public class CalibreLibraryCanonicalizer : IHandle<AuthorScannedEvent>, IHandle<BookFileAddedEvent>, IExecute<CanonicalizeCalibreLibraryCommand>
     {
         private readonly IRootFolderService _rootFolderService;
+        private readonly IAuthorService _authorService;
+        private readonly IManageCommandQueue _commandQueueManager;
         private readonly IMediaFileService _mediaFileService;
         private readonly ICalibreProxy _calibreProxy;
         private readonly IConfigService _configService;
         private readonly Logger _logger;
 
         public CalibreLibraryCanonicalizer(IRootFolderService rootFolderService,
+                                           IAuthorService authorService,
+                                           IManageCommandQueue commandQueueManager,
                                            IMediaFileService mediaFileService,
                                            ICalibreProxy calibreProxy,
                                            IConfigService configService,
                                            Logger logger)
         {
             _rootFolderService = rootFolderService;
+            _authorService = authorService;
+            _commandQueueManager = commandQueueManager;
             _mediaFileService = mediaFileService;
             _calibreProxy = calibreProxy;
             _configService = configService;
@@ -35,8 +43,35 @@ namespace NzbDrone.Core.Books.Calibre
 
         public void Handle(AuthorScannedEvent message)
         {
-            var author = message.Author;
+            CanonicalizeAuthor(message.Author);
+        }
 
+        public void Execute(CanonicalizeCalibreLibraryCommand message)
+        {
+            CanonicalizeAuthor(_authorService.GetAuthor(message.AuthorId));
+        }
+
+        public void Handle(BookFileAddedEvent message)
+        {
+            // Ingest attaches can land without a trailing author scan, so queue a
+            // deduplicated canonicalize pass that runs once the import work drains.
+            if (!_configService.CanonicalizeCalibreLibraryMetadata)
+            {
+                return;
+            }
+
+            var authorId = message.BookFile?.Author?.Id ?? 0;
+
+            if (authorId <= 0)
+            {
+                return;
+            }
+
+            _commandQueueManager.Push(new CanonicalizeCalibreLibraryCommand { AuthorId = authorId });
+        }
+
+        private void CanonicalizeAuthor(Author author)
+        {
             if (author == null || author.Path.IsNullOrWhiteSpace() || !_configService.CanonicalizeCalibreLibraryMetadata)
             {
                 return;
