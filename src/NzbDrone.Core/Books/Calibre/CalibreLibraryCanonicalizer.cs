@@ -285,6 +285,17 @@ namespace NzbDrone.Core.Books.Calibre
             var canonicalized = 0;
             var renamedFiles = new List<RenamedBookFile>();
 
+            List<CalibreBook> libraryBooks = null;
+
+            try
+            {
+                libraryBooks = _calibreProxy.GetAllBooks(settings);
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "Unable to enumerate library for duplicate reaping");
+            }
+
             foreach (var pair in groups)
             {
                 try
@@ -293,6 +304,8 @@ namespace NzbDrone.Core.Books.Calibre
                     {
                         canonicalized++;
                     }
+
+                    ReapDuplicateRecords(pair.Key, libraryBooks, settings);
                 }
                 catch (Exception ex)
                 {
@@ -355,6 +368,164 @@ namespace NzbDrone.Core.Books.Calibre
             RefreshTrackedPaths(calibreId, files, settings, renamedFiles);
             RewriteOpfTitle(files, canonicalTitle);
             return true;
+        }
+
+        private void ReapDuplicateRecords(int canonicalId, List<CalibreBook> libraryBooks, CalibreSettings settings)
+        {
+            if (libraryBooks == null || libraryBooks.Count == 0)
+            {
+                return;
+            }
+
+            var canonical = libraryBooks.FirstOrDefault(b => b.Id == canonicalId);
+
+            if (canonical == null)
+            {
+                return;
+            }
+
+            var canonicalTitleForms = TitleForms(canonical);
+            var canonicalAuthors = AuthorTokens(canonical);
+            var canonicalFormats = FormatKeys(canonical);
+
+            if (canonicalTitleForms.Count == 0 || canonicalAuthors.Count == 0)
+            {
+                return;
+            }
+
+            var duplicates = new List<int>();
+
+            foreach (var candidate in libraryBooks)
+            {
+                if (candidate == null || candidate.Id == canonicalId)
+                {
+                    continue;
+                }
+
+                if (!AuthorTokens(candidate).Overlaps(canonicalAuthors))
+                {
+                    continue;
+                }
+
+                if (!TitleForms(candidate).Overlaps(canonicalTitleForms))
+                {
+                    continue;
+                }
+
+                // Only reap when the canonical record already holds every format the
+                // duplicate has, so no unique file is lost.
+                if (!FormatKeys(candidate).IsSubsetOf(canonicalFormats))
+                {
+                    _logger.Debug("Keeping duplicate calibre record {0}; it carries formats the canonical {1} lacks", candidate.Id, canonicalId);
+                    continue;
+                }
+
+                duplicates.Add(candidate.Id);
+            }
+
+            if (!duplicates.Any())
+            {
+                return;
+            }
+
+            try
+            {
+                _calibreProxy.DeleteBookIds(duplicates, settings);
+                _logger.Info("Removed {0} duplicate calibre record(s) for canonical book {1}: {2}", duplicates.Count, canonicalId, string.Join(",", duplicates));
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, "Unable to remove duplicate calibre records for canonical book {0}", canonicalId);
+            }
+        }
+
+        private static HashSet<string> TitleForms(CalibreBook book)
+        {
+            var forms = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var title in new[] { book?.Title })
+            {
+                if (title.IsNullOrWhiteSpace())
+                {
+                    continue;
+                }
+
+                var normalized = NormalizeTitle(title);
+
+                if (normalized.Length > 0)
+                {
+                    forms.Add(normalized);
+                }
+
+                // Branded variants ("The Lord of the Rings 2 - The Two Towers") carry the
+                // canonical title as a trailing dash segment.
+                foreach (var segment in title.Split(new[] { " - " }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var seg = NormalizeTitle(segment);
+
+                    if (seg.Length > 3)
+                    {
+                        forms.Add(seg);
+                    }
+                }
+            }
+
+            return forms;
+        }
+
+        private static HashSet<string> AuthorTokens(CalibreBook book)
+        {
+            var tokens = new HashSet<string>(StringComparer.Ordinal);
+            var authors = book?.Authors ?? new List<string>();
+
+            if (book?.AuthorSort.IsNotNullOrWhiteSpace() == true)
+            {
+                authors = new List<string>(authors) { book.AuthorSort };
+            }
+
+            foreach (var author in authors)
+            {
+                if (author.IsNullOrWhiteSpace())
+                {
+                    continue;
+                }
+
+                foreach (var token in NormalizeTitle(author).Split(' '))
+                {
+                    if (token.Length > 1)
+                    {
+                        tokens.Add(token);
+                    }
+                }
+            }
+
+            return tokens;
+        }
+
+        private static HashSet<string> FormatKeys(CalibreBook book)
+        {
+            var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (book?.Formats != null)
+            {
+                foreach (var key in book.Formats.Keys)
+                {
+                    keys.Add(key);
+                }
+            }
+
+            return keys;
+        }
+
+        private static string NormalizeTitle(string value)
+        {
+            if (value.IsNullOrWhiteSpace())
+            {
+                return string.Empty;
+            }
+
+            var cleaned = Regex.Replace(value.ToLowerInvariant(), "[^a-z0-9 ]", " ");
+            return Regex.Replace(cleaned, "\\s+", " ").Trim();
         }
 
         private void RewriteOpfTitle(List<BookFile> files, string canonicalTitle)

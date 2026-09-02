@@ -36,6 +36,7 @@ namespace NzbDrone.Core.Books.Calibre
         int GetCalibreIdForPath(string path, CalibreSettings settings);
         CalibreBook GetBook(int calibreId, CalibreSettings settings);
         List<CalibreBook> GetBooks(List<int> calibreId, CalibreSettings settings);
+        List<CalibreBook> GetAllBooks(CalibreSettings settings);
         void Test(CalibreSettings settings);
     }
 
@@ -422,6 +423,28 @@ namespace NzbDrone.Core.Books.Calibre
             {
                 throw new CalibreException("Unable to connect to Calibre library: {0}", ex, ex.Message);
             }
+        }
+
+        public List<CalibreBook> GetAllBooks(CalibreSettings settings)
+        {
+            var ids = GetAllBookIds(settings);
+            var result = new List<CalibreBook>();
+            var offset = 0;
+
+            while (offset < ids.Count)
+            {
+                var chunk = ids.Skip(offset).Take(PAGE_SIZE).ToList();
+
+                if (chunk.Count == 0)
+                {
+                    break;
+                }
+
+                result.AddRange(GetBooks(chunk, settings));
+                offset += PAGE_SIZE;
+            }
+
+            return result;
         }
 
         public List<CalibreBook> GetBooks(List<int> calibreIds, CalibreSettings settings)
