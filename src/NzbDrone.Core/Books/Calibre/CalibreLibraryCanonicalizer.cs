@@ -98,6 +98,19 @@ namespace NzbDrone.Core.Books.Calibre
             {
                 _logger.Info("Canonicalized calibre metadata for '{0}'", book.Title);
             }
+
+            // An explicit canonicalize asks for everything to agree: nudge the
+            // rename-following consumers (e.g. AudioBookShelf item rescans) even
+            // when nothing needed to move this pass.
+            var currentFiles = files
+                .Where(f => f?.Path.IsNotNullOrWhiteSpace() == true)
+                .Select(f => new RenamedBookFile { BookFile = f, PreviousPath = f.Path })
+                .ToList();
+
+            if (currentFiles.Any())
+            {
+                _eventAggregator.PublishEvent(new AuthorRenamedEvent(author, currentFiles));
+            }
         }
 
         public void Handle(BookFileAddedEvent message)
