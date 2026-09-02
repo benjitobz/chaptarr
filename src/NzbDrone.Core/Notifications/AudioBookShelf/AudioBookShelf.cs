@@ -114,6 +114,10 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             }
 
             SendLibraryScans(libraryScans);
+
+            // A rename retires the old folder identity; sweep whatever the move left
+            // flagged so canonicalization renames do not strand ghost items.
+            SchedulePurgeForDelete(libraryScans);
         }
 
         public override void OnBookFileDelete(BookFileDeleteMessage deleteMessage)
