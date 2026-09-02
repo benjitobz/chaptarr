@@ -6,7 +6,9 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using NLog;
+using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Books;
+using NzbDrone.Core.RootFolders;
 using NzbDrone.Core.Datastore;
 using NzbDrone.Core.MediaFiles;
 
@@ -25,6 +27,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
         private readonly IBookService _bookService;
         private readonly IEditionService _editionService;
         private readonly IMainDatabase _mainDatabase;
+        private readonly IRootFolderService _rootFolderService;
         private readonly Logger _logger;
 
         // Cache per canonical book + unit so we don't create multiple clones for the same physical unit.
@@ -36,12 +39,14 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             IBookService bookService,
             IEditionService editionService,
             IMainDatabase mainDatabase,
+            IRootFolderService rootFolderService,
             Logger logger)
         {
             _mediaFileService = mediaFileService;
             _bookService = bookService;
             _editionService = editionService;
             _mainDatabase = mainDatabase;
+            _rootFolderService = rootFolderService;
             _logger = logger;
         }
 
@@ -69,6 +74,16 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             if (canonicalBook == null || canonicalBook.Id <= 0 || canonicalEdition == null || canonicalEdition.Id <= 0)
             {
                 throw new ArgumentException("Canonical book/edition must be provided for destination resolution");
+            }
+
+            if (IsCalibreLibraryBook(canonicalBook))
+            {
+                // Calibre owns multi-format grouping: one record holds every format of a
+                // book. Cloning a second Chaptarr book for another format (or a branded
+                // re-upload's edition) fragments the library, so always route calibre
+                // units to the canonical book's edition and never clone.
+                var calibreEditionId = ResolveEditionIdForDestination(canonicalBook, canonicalEdition);
+                return (canonicalBook.Id, calibreEditionId);
             }
 
             unitKey = unitKey ?? string.Empty;
@@ -197,6 +212,26 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             var dest2 = (clone.BookId, clone.EditionId);
             if (!string.IsNullOrWhiteSpace(cacheKey)) _unitDestCache[cacheKey] = dest2;
             return dest2;
+        }
+
+        private bool IsCalibreLibraryBook(Book book)
+        {
+            try
+            {
+                var path = book?.Author?.Path;
+
+                if (path.IsNullOrWhiteSpace())
+                {
+                    return false;
+                }
+
+                var rootFolder = _rootFolderService.GetBestRootFolder(path);
+                return rootFolder != null && rootFolder.IsCalibreLibrary;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static string BuildUnitDestCacheKey(Book canonicalBook, string unitKeyOrHash)

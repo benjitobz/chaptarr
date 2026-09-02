@@ -384,11 +384,11 @@ namespace NzbDrone.Core.Books.Calibre
                 return;
             }
 
-            var canonicalTitleForms = TitleForms(canonical);
+            var canonicalTitle = NormalizeTitle(canonical.Title);
             var canonicalAuthors = AuthorTokens(canonical);
             var canonicalFormats = FormatKeys(canonical);
 
-            if (canonicalTitleForms.Count == 0 || canonicalAuthors.Count == 0)
+            if (canonicalTitle.Length <= 4 || canonicalAuthors.Count == 0)
             {
                 return;
             }
@@ -407,7 +407,7 @@ namespace NzbDrone.Core.Books.Calibre
                     continue;
                 }
 
-                if (!TitleForms(candidate).Overlaps(canonicalTitleForms))
+                if (!IsBrandedVariantOf(candidate, canonicalTitle))
                 {
                     continue;
                 }
@@ -439,38 +439,21 @@ namespace NzbDrone.Core.Books.Calibre
             }
         }
 
-        private static HashSet<string> TitleForms(CalibreBook book)
+        private static bool IsBrandedVariantOf(CalibreBook candidate, string canonicalTitle)
         {
-            var forms = new HashSet<string>(StringComparer.Ordinal);
+            var candidateTitle = NormalizeTitle(candidate?.Title);
 
-            foreach (var title in new[] { book?.Title })
+            if (candidateTitle.Length == 0)
             {
-                if (title.IsNullOrWhiteSpace())
-                {
-                    continue;
-                }
-
-                var normalized = NormalizeTitle(title);
-
-                if (normalized.Length > 0)
-                {
-                    forms.Add(normalized);
-                }
-
-                // Branded variants ("The Lord of the Rings 2 - The Two Towers") carry the
-                // canonical title as a trailing dash segment.
-                foreach (var segment in title.Split(new[] { " - " }, StringSplitOptions.RemoveEmptyEntries))
-                {
-                    var seg = NormalizeTitle(segment);
-
-                    if (seg.Length > 3)
-                    {
-                        forms.Add(seg);
-                    }
-                }
+                return false;
             }
 
-            return forms;
+            // Exact match, or a branded form that carries the canonical title as a
+            // trailing phrase: "the lord of the rings part 1 the fellowship of the ring"
+            // ends with "the fellowship of the ring". The word boundary (leading space)
+            // prevents partial-word coincidences.
+            return candidateTitle.Equals(canonicalTitle, StringComparison.Ordinal) ||
+                   candidateTitle.EndsWith(" " + canonicalTitle, StringComparison.Ordinal);
         }
 
         private static HashSet<string> AuthorTokens(CalibreBook book)
