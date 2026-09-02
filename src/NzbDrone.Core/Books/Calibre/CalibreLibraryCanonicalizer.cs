@@ -92,7 +92,7 @@ namespace NzbDrone.Core.Books.Calibre
                 .Where(f => f != null && f.Path.IsNotNullOrWhiteSpace())
                 .ToList();
 
-            var canonicalized = ProcessFiles(author, settings, files);
+            var canonicalized = ProcessFiles(author, settings, files, force: true);
 
             if (canonicalized > 0)
             {
@@ -193,7 +193,7 @@ namespace NzbDrone.Core.Books.Calibre
             return true;
         }
 
-        private int ProcessFiles(Author author, CalibreSettings settings, List<BookFile> files)
+        private int ProcessFiles(Author author, CalibreSettings settings, List<BookFile> files, bool force = false)
         {
             if (!files.Any())
             {
@@ -242,7 +242,7 @@ namespace NzbDrone.Core.Books.Calibre
             {
                 try
                 {
-                    if (CanonicalizeBook(pair.Key, pair.Value, settings, renamedFiles))
+                    if (CanonicalizeBook(pair.Key, pair.Value, settings, renamedFiles, force))
                     {
                         canonicalized++;
                     }
@@ -264,7 +264,7 @@ namespace NzbDrone.Core.Books.Calibre
             return canonicalized;
         }
 
-        private bool CanonicalizeBook(int calibreId, List<BookFile> files, CalibreSettings settings, List<RenamedBookFile> renamedFiles)
+        private bool CanonicalizeBook(int calibreId, List<BookFile> files, CalibreSettings settings, List<RenamedBookFile> renamedFiles, bool force = false)
         {
             var reference = files.FirstOrDefault(f => f.Edition?.Title.IsNotNullOrWhiteSpace() == true);
 
@@ -297,7 +297,9 @@ namespace NzbDrone.Core.Books.Calibre
                                    !chosenSeries.Equals(calibreSeries ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
                                    (calibreSeries.IsNullOrWhiteSpace() || CalibreSeriesSelector.KnownSeriesTitles(book).Contains(calibreSeries));
 
-            if (titleMatches && authorMatches && !seriesNeedsStamp)
+            // The explicit command is a request to make everything agree, including a
+            // cover that raced the original stamp; skip only on the automatic passes.
+            if (!force && titleMatches && authorMatches && !seriesNeedsStamp)
             {
                 return false;
             }
