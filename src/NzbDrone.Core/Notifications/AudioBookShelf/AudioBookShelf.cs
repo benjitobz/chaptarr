@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
 using FluentValidation;
 using FluentValidation.Results;
 using NLog;
@@ -259,6 +260,28 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             }
         }
 
+        private void SchedulePurgeMissing(string libraryId)
+        {
+            var settings = Settings;
+            var proxy = _proxy;
+            var logger = _logger;
+
+            // The scan triggered alongside this purge flags freshly deleted files as
+            // missing asynchronously; wait it out before sweeping, or the sweep runs
+            // before anything is flagged and the ghost item survives.
+            Task.Delay(TimeSpan.FromSeconds(30)).ContinueWith(_ =>
+            {
+                try
+                {
+                    proxy.RemoveItemsWithIssues(settings, libraryId);
+                }
+                catch (Exception ex)
+                {
+                    logger.Debug(ex, "Failed to remove missing items for library: {0}", libraryId);
+                }
+            });
+        }
+
         private void SendLibraryScans(ISet<string> libraryIds, bool purgeMissing = false)
         {
             if (libraryIds == null || libraryIds.Count == 0)
@@ -274,14 +297,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 {
                     if (purgeMissing && Settings.RemoveMissingItems)
                     {
-                        try
-                        {
-                            _proxy.RemoveItemsWithIssues(Settings, libraryId);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.Debug(ex, "Failed to remove missing items for library: {0}", libraryId);
-                        }
+                        SchedulePurgeMissing(libraryId);
                     }
 
                     _logger.Debug("Triggering AudioBookShelf scan for library: {0}", libraryId);
