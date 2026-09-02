@@ -140,7 +140,8 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 AddLegacyLibraryScans(author, filePath, mediaType, libraryScans);
             }
 
-            SendLibraryScans(libraryScans, purgeMissing: true);
+            SendLibraryScans(libraryScans);
+            SchedulePurgeForDelete(libraryScans);
         }
 
         public override void OnBookDelete(BookDeleteMessage deleteMessage)
@@ -159,7 +160,8 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 AddLegacyLibraryScans(author, null, mediaType, libraryScans);
             }
 
-            SendLibraryScans(libraryScans, purgeMissing: true);
+            SendLibraryScans(libraryScans);
+            SchedulePurgeForDelete(libraryScans);
         }
 
         public override void OnAuthorDelete(AuthorDeleteMessage deleteMessage)
@@ -177,7 +179,8 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 AddLegacyLibraryScans(author, null, null, libraryScans);
             }
 
-            SendLibraryScans(libraryScans, purgeMissing: true);
+            SendLibraryScans(libraryScans);
+            SchedulePurgeForDelete(libraryScans);
         }
 
         // Watcher updates and scan fallbacks are sent at event time (fire and forget). Notification
@@ -260,6 +263,37 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             }
         }
 
+        private void SchedulePurgeForDelete(ISet<string> libraryScans)
+        {
+            // Mapped deletes are handled with watcher updates and never enter the scan
+            // loop, so purge scheduling must not live there: sweep every library this
+            // connection covers, whichever notification path ran.
+            if (!Settings.RemoveMissingItems)
+            {
+                return;
+            }
+
+            var libraryIds = new HashSet<string>(libraryScans ?? new HashSet<string>(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var mapping in Settings.GetLibraryMappings())
+            {
+                if (mapping?.LibraryId.IsNotNullOrWhiteSpace() == true)
+                {
+                    libraryIds.Add(mapping.LibraryId);
+                }
+            }
+
+            if (Settings.LibraryId.IsNotNullOrWhiteSpace())
+            {
+                libraryIds.Add(Settings.LibraryId);
+            }
+
+            foreach (var libraryId in libraryIds)
+            {
+                SchedulePurgeMissing(libraryId);
+            }
+        }
+
         private void SchedulePurgeMissing(string libraryId)
         {
             var settings = Settings;
@@ -282,7 +316,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             });
         }
 
-        private void SendLibraryScans(ISet<string> libraryIds, bool purgeMissing = false)
+        private void SendLibraryScans(ISet<string> libraryIds)
         {
             if (libraryIds == null || libraryIds.Count == 0)
             {
@@ -295,11 +329,6 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             {
                 try
                 {
-                    if (purgeMissing && Settings.RemoveMissingItems)
-                    {
-                        SchedulePurgeMissing(libraryId);
-                    }
-
                     _logger.Debug("Triggering AudioBookShelf scan for library: {0}", libraryId);
                     _proxy.ScanLibrary(Settings, libraryId);
                 }
