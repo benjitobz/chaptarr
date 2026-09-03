@@ -18,6 +18,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
         void ScanItem(AudioBookShelfSettings settings, string itemId);
         void UpdateItemTitle(AudioBookShelfSettings settings, string itemId, string title);
         void UpdateItemCover(AudioBookShelfSettings settings, string itemId, string coverPath);
+        void PurgeCoverCache(AudioBookShelfSettings settings);
         void UpdateWatchedPath(AudioBookShelfSettings settings, string libraryId, string path, string type, string oldPath = null);
         ValidationFailure Test(AudioBookShelfSettings settings);
         List<AudioBookShelfLibrary> GetLibraries(AudioBookShelfSettings settings);
@@ -276,6 +277,32 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             if (response.HasHttpError)
             {
                 throw new HttpException(response);
+            }
+        }
+
+        public void PurgeCoverCache(AudioBookShelfSettings settings)
+        {
+            // Updating an item's cover from the same path does not invalidate the
+            // server-side resized thumbnail cache (/metadata/cache/covers/*_400.webp),
+            // so the library grid keeps showing the old art. Purge the cache so the
+            // thumbnails regenerate from the refreshed covers.
+            try
+            {
+                var request = BuildRequest(settings, "/api/cache/purge");
+                request.Method = HttpMethod.Post;
+                request.Headers.ContentType = "application/json";
+                request.SetContent("{}");
+
+                var response = _httpClient.Execute(request);
+
+                if (response.HasHttpError)
+                {
+                    throw new HttpException(response);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "AudioBookShelf: cover cache purge failed");
             }
         }
 

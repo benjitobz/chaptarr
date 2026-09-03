@@ -392,6 +392,9 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                             logger.Debug("AudioBookShelf: requested item rescan for '{0}'", rel);
                         }
                     }
+
+                    // Regenerate resized thumbnails from the refreshed covers.
+                    proxy.PurgeCoverCache(settings);
                 }
                 catch (Exception ex)
                 {
