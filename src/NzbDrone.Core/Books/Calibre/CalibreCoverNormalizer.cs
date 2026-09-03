@@ -15,10 +15,74 @@ namespace NzbDrone.Core.Books.Calibre
         private const int TargetWidth = 600;
         private const int TargetHeight = 900;
 
+        private static bool IsProgressiveJpeg(byte[] data)
+        {
+            if (data == null || data.Length < 4 || data[0] != 0xFF || data[1] != 0xD8)
+            {
+                return false;
+            }
+
+            var i = 2;
+
+            while (i < data.Length - 1)
+            {
+                if (data[i] != 0xFF)
+                {
+                    i++;
+                    continue;
+                }
+
+                var marker = data[i + 1];
+
+                // SOF2 = progressive DCT.
+                if (marker == 0xC2)
+                {
+                    return true;
+                }
+
+                // Other Start-Of-Frame markers = baseline/extended: not progressive.
+                if (marker == 0xC0 || marker == 0xC1 || marker == 0xC3)
+                {
+                    return false;
+                }
+
+                // Standalone markers without a length payload.
+                if (marker == 0xD8 || marker == 0xD9 || (marker >= 0xD0 && marker <= 0xD7) || marker == 0x01 || marker == 0xFF)
+                {
+                    i += 2;
+                    continue;
+                }
+
+                if (i + 3 >= data.Length)
+                {
+                    return false;
+                }
+
+                var segLength = (data[i + 2] << 8) | data[i + 3];
+
+                if (segLength < 2)
+                {
+                    return false;
+                }
+
+                i += 2 + segLength;
+            }
+
+            return false;
+        }
+
         public static byte[] Normalize(byte[] source)
         {
             if (source == null || source.Length == 0)
             {
+                return source;
+            }
+
+            if (IsProgressiveJpeg(source))
+            {
+                // ImageSharp 3.1.x mis-decodes progressive JPEGs (planar components read
+                // as a 3x-wide image), so re-encoding one corrupts it. Leave these covers
+                // at their native size rather than mangle them.
                 return source;
             }
 
