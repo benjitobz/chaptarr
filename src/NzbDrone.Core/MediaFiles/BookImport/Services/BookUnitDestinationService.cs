@@ -28,6 +28,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
         private readonly IEditionService _editionService;
         private readonly IMainDatabase _mainDatabase;
         private readonly IRootFolderService _rootFolderService;
+        private readonly IAuthorService _authorService;
         private readonly Logger _logger;
 
         // Cache per canonical book + unit so we don't create multiple clones for the same physical unit.
@@ -40,6 +41,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             IEditionService editionService,
             IMainDatabase mainDatabase,
             IRootFolderService rootFolderService,
+            IAuthorService authorService,
             Logger logger)
         {
             _mediaFileService = mediaFileService;
@@ -47,6 +49,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             _editionService = editionService;
             _mainDatabase = mainDatabase;
             _rootFolderService = rootFolderService;
+            _authorService = authorService;
             _logger = logger;
         }
 
@@ -219,6 +222,20 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             try
             {
                 var path = book?.Author?.Path;
+
+                if (path.IsNullOrWhiteSpace() && book != null && book.AuthorId > 0)
+                {
+                    // The book handed to the resolver often has its Author lazy-unset;
+                    // load it so a calibre-library book is still recognized (otherwise the
+                    // clone guard silently no-ops and a duplicate row gets created).
+                    try
+                    {
+                        path = _authorService.GetAuthor(book.AuthorId)?.Path;
+                    }
+                    catch
+                    {
+                    }
+                }
 
                 if (path.IsNullOrWhiteSpace())
                 {
