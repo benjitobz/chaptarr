@@ -33,6 +33,7 @@ namespace NzbDrone.Core.Books.Calibre
         List<string> GetAllBookFilePaths(CalibreSettings settings);
         Dictionary<int, string> GetBookTitlesUnderPath(string localPathPrefix, CalibreSettings settings);
         void DeleteBookIds(List<int> calibreIds, CalibreSettings settings);
+        void EmbedBookMetadata(int calibreId, CalibreSettings settings);
         int GetCalibreIdForPath(string path, CalibreSettings settings);
         CalibreBook GetBook(int calibreId, CalibreSettings settings);
         List<CalibreBook> GetBooks(List<int> calibreId, CalibreSettings settings);
@@ -315,6 +316,24 @@ namespace NzbDrone.Core.Books.Calibre
             request.SetContent(payload.ToJson());
             request.ContentSummary = payload.ToJson(Formatting.None);
 
+            _httpClient.Execute(request);
+        }
+
+        public void EmbedBookMetadata(int calibreId, CalibreSettings settings)
+        {
+            // Run this AFTER the cover/metadata set-fields has settled. An embed fired
+            // inline right after setting the cover races calibre's cover write and bakes
+            // the previous cover into the book files; a separate, slightly delayed call
+            // captures the updated cover.
+            Thread.Sleep(1000);
+
+            var request = GetBuilder("cdb/cmd/embed_metadata", settings)
+                .AddQueryParam("library_id", settings.Library)
+                .Post()
+                .SetHeader("Content-Type", "application/json")
+                .Build();
+
+            request.SetContent($"[{calibreId}, null]");
             _httpClient.Execute(request);
         }
 

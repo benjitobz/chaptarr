@@ -364,7 +364,18 @@ namespace NzbDrone.Core.Books.Calibre
                 return false;
             }
 
-            _calibreProxy.SetFields(reference, settings, updateCover: true, embed: true);
+            _calibreProxy.SetFields(reference, settings, updateCover: true, embed: false);
+
+            // Bake the freshly-set cover/metadata into the actual book files as a
+            // separate step so the embed captures the new cover, not the old one.
+            try
+            {
+                _calibreProxy.EmbedBookMetadata(calibreId, settings);
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "Unable to embed metadata into files for calibre book {0}", calibreId);
+            }
             RefreshTrackedPaths(calibreId, files, settings, renamedFiles);
             RewriteOpfTitle(files, canonicalTitle);
             return true;
