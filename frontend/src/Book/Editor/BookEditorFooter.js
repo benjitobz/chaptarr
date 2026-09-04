@@ -1,10 +1,15 @@
 import PropTypes from 'prop-types';
 import React, { Component } from 'react';
+import { connect } from 'react-redux';
+import * as commandNames from 'Commands/commandNames';
 import SelectInput from 'Components/Form/SelectInput';
 import SpinnerButton from 'Components/Link/SpinnerButton';
 import PageContentFooter from 'Components/Page/PageContentFooter';
 import { kinds } from 'Helpers/Props';
+import { executeCommand } from 'Store/Actions/commandActions';
+import createCommandExecutingSelector from 'Store/Selectors/createCommandExecutingSelector';
 import translate from 'Utilities/String/translate';
+import CalibrePushModal from 'Calibre/CalibrePushModal';
 import BookEditorFooterLabel from './BookEditorFooterLabel';
 import DeleteBookModal from './Delete/DeleteBookModal';
 import styles from './BookEditorFooter.css';
@@ -24,6 +29,7 @@ class BookEditorFooter extends Component {
       rootFolderPath: NO_CHANGE,
       savingTags: false,
       isDeleteBookModalOpen: false,
+      isCalibrePushModalOpen: false,
       isTagsModalOpen: false,
       isConfirmMoveModalOpen: false,
       destinationRootFolder: null
@@ -64,6 +70,24 @@ class BookEditorFooter extends Component {
     }
   };
 
+  onPushToCalibrePress = () => {
+    this.setState({ isCalibrePushModalOpen: true });
+  };
+
+  onCalibrePushModalClose = () => {
+    this.setState({ isCalibrePushModalOpen: false });
+  };
+
+  onCalibrePushConfirmed = (fields) => {
+    this.setState({ isCalibrePushModalOpen: false });
+
+    this.props.executeCommand({
+      name: commandNames.PUSH_CALIBRE_METADATA,
+      bookIds: this.props.bookIds,
+      fields
+    });
+  };
+
   onDeleteSelectedPress = () => {
     this.setState({ isDeleteBookModalOpen: true });
   };
@@ -80,12 +104,14 @@ class BookEditorFooter extends Component {
       bookIds,
       selectedCount,
       isSaving,
-      isDeleting
+      isDeleting,
+      isPushingToCalibre
     } = this.props;
 
     const {
       monitored,
-      isDeleteBookModalOpen
+      isDeleteBookModalOpen,
+      isCalibrePushModalOpen
     } = this.state;
 
     const monitoredOptions = [
@@ -120,6 +146,16 @@ class BookEditorFooter extends Component {
 
             <div className={styles.buttons}>
               <SpinnerButton
+                className={styles.organizeSelectedButton}
+                kind={kinds.WARNING}
+                isSpinning={isPushingToCalibre}
+                isDisabled={!selectedCount || isPushingToCalibre}
+                onPress={this.onPushToCalibrePress}
+              >
+                {translate('PushMetadataToCalibre')}
+              </SpinnerButton>
+
+              <SpinnerButton
                 className={styles.deleteSelectedButton}
                 kind={kinds.DANGER}
                 isSpinning={isDeleting}
@@ -131,6 +167,13 @@ class BookEditorFooter extends Component {
             </div>
           </div>
         </div>
+
+        <CalibrePushModal
+          isOpen={isCalibrePushModalOpen}
+          bookCount={selectedCount}
+          onPushPress={this.onCalibrePushConfirmed}
+          onModalClose={this.onCalibrePushModalClose}
+        />
 
         <DeleteBookModal
           isOpen={isDeleteBookModalOpen}
@@ -150,7 +193,17 @@ BookEditorFooter.propTypes = {
   saveError: PropTypes.object,
   isDeleting: PropTypes.bool.isRequired,
   deleteError: PropTypes.object,
+  isPushingToCalibre: PropTypes.bool.isRequired,
+  executeCommand: PropTypes.func.isRequired,
   onSaveSelected: PropTypes.func.isRequired
 };
 
-export default BookEditorFooter;
+const selectIsPushingToCalibre = createCommandExecutingSelector(commandNames.PUSH_CALIBRE_METADATA);
+
+function mapStateToProps(state) {
+  return {
+    isPushingToCalibre: selectIsPushingToCalibre(state)
+  };
+}
+
+export default connect(mapStateToProps, { executeCommand })(BookEditorFooter);
