@@ -1047,12 +1047,10 @@ namespace NzbDrone.Core.MediaCover
             }
         }
 
-        /// <summary>
-        /// Every edition of a book shares one cover file name, so a url that was mapped to that
-        /// file no longer describes what the file holds once a different edition is written over
-        /// it. Drop those mappings before overwriting, otherwise a later switch back reuses the
-        /// wrong image and then stamps the sidecar as if it were right.
-        /// </summary>
+        // Every edition of a book shares one cover file name, so a url that was mapped to that
+        // file no longer describes what the file holds once a different edition is written over
+        // it. Drop those mappings before overwriting, otherwise a later switch back reuses the
+        // wrong image and then stamps the sidecar as if it were right.
         private void ForgetCachedCoverPath(string fileName)
         {
             if (fileName.IsNullOrWhiteSpace())
@@ -1089,6 +1087,8 @@ namespace NzbDrone.Core.MediaCover
             var downloadedOrReused = false;
             if (!selectedUrlAlreadyStored || !hasOriginal)
             {
+                ForgetCachedCoverPath(fileName);
+
                 var urlHash = ComputeHash(cover.Url);
                 if (!string.IsNullOrWhiteSpace(urlHash) &&
                     _bookCoverUrlToPath.TryGetValue(urlHash, out var cachedPath) &&
@@ -1101,7 +1101,6 @@ namespace NzbDrone.Core.MediaCover
                 }
                 else
                 {
-                    ForgetCachedCoverPath(fileName);
                     DownloadBookCover(book, cover, DateTime.Now);
                     downloadedOrReused = true;
                 }

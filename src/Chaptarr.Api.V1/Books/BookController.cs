@@ -1860,6 +1860,7 @@ namespace Chaptarr.Api.V1.Books
             foreach (var edition in submitted.Where(e => e?.Images != null))
             {
                 var storedImages = stored?.FirstOrDefault(e => e != null && e.Id == edition.Id)?.Images;
+                var unresolved = new List<NzbDrone.Core.MediaCover.MediaCover>();
 
                 foreach (var image in edition.Images.Where(i => i != null && _mediaCoverProxy.IsProxyUrl(i.Url)))
                 {
@@ -1874,7 +1875,18 @@ namespace Chaptarr.Api.V1.Books
                     if (storedUrl.IsNotNullOrWhiteSpace())
                     {
                         image.Url = storedUrl;
+                        continue;
                     }
+
+                    unresolved.Add(image);
+                }
+
+                if (unresolved.Count > 0)
+                {
+                    // A proxy url that outlived its cache entry describes nothing; persisting
+                    // it would overwrite real image data with a dead link.
+                    _logger.Debug("Dropping {0} cover(s) on edition {1} whose proxy urls could no longer be resolved", unresolved.Count, edition.Id);
+                    edition.Images = edition.Images.Except(unresolved).ToList();
                 }
             }
         }
