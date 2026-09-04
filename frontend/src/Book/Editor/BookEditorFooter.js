@@ -7,6 +7,7 @@ import SpinnerButton from 'Components/Link/SpinnerButton';
 import PageContentFooter from 'Components/Page/PageContentFooter';
 import { kinds } from 'Helpers/Props';
 import { executeCommand } from 'Store/Actions/commandActions';
+import { fetchRootFolders } from 'Store/Actions/Settings/rootFolders';
 import createCommandExecutingSelector from 'Store/Selectors/createCommandExecutingSelector';
 import translate from 'Utilities/String/translate';
 import CalibrePushModal from 'Calibre/CalibrePushModal';
@@ -34,6 +35,10 @@ class BookEditorFooter extends Component {
       isConfirmMoveModalOpen: false,
       destinationRootFolder: null
     };
+  }
+
+  componentDidMount() {
+    this.props.fetchRootFolders();
   }
 
   componentDidUpdate(prevProps) {
@@ -105,7 +110,8 @@ class BookEditorFooter extends Component {
       selectedCount,
       isSaving,
       isDeleting,
-      isPushingToCalibre
+      isPushingToCalibre,
+      showPushToCalibre
     } = this.props;
 
     const {
@@ -145,15 +151,19 @@ class BookEditorFooter extends Component {
             />
 
             <div className={styles.buttons}>
-              <SpinnerButton
-                className={styles.organizeSelectedButton}
-                kind={kinds.WARNING}
-                isSpinning={isPushingToCalibre}
-                isDisabled={!selectedCount || isPushingToCalibre}
-                onPress={this.onPushToCalibrePress}
-              >
-                {translate('PushMetadataToCalibre')}
-              </SpinnerButton>
+              {
+                showPushToCalibre ?
+                  <SpinnerButton
+                    className={styles.organizeSelectedButton}
+                    kind={kinds.WARNING}
+                    isSpinning={isPushingToCalibre}
+                    isDisabled={!selectedCount || isPushingToCalibre}
+                    onPress={this.onPushToCalibrePress}
+                  >
+                    {translate('PushMetadataToCalibre')}
+                  </SpinnerButton> :
+                  null
+              }
 
               <SpinnerButton
                 className={styles.deleteSelectedButton}
@@ -194,7 +204,9 @@ BookEditorFooter.propTypes = {
   isDeleting: PropTypes.bool.isRequired,
   deleteError: PropTypes.object,
   isPushingToCalibre: PropTypes.bool.isRequired,
+  showPushToCalibre: PropTypes.bool.isRequired,
   executeCommand: PropTypes.func.isRequired,
+  fetchRootFolders: PropTypes.func.isRequired,
   onSaveSelected: PropTypes.func.isRequired
 };
 
@@ -202,8 +214,9 @@ const selectIsPushingToCalibre = createCommandExecutingSelector(commandNames.PUS
 
 function mapStateToProps(state) {
   return {
-    isPushingToCalibre: selectIsPushingToCalibre(state)
+    isPushingToCalibre: selectIsPushingToCalibre(state),
+    showPushToCalibre: state.settings.rootFolders.items.some((f) => f.isCalibreLibrary)
   };
 }
 
-export default connect(mapStateToProps, { executeCommand })(BookEditorFooter);
+export default connect(mapStateToProps, { executeCommand, fetchRootFolders })(BookEditorFooter);

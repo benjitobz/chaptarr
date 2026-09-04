@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -68,7 +69,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport
         }
 
         private readonly IMediaFileService _mediaFileService;
-        private readonly System.Collections.Concurrent.ConcurrentDictionary<int, (int CalibreId, DateTime Added)> _recentCalibreIdsByEditionId = new System.Collections.Concurrent.ConcurrentDictionary<int, (int CalibreId, DateTime Added)>();
+        private readonly ConcurrentDictionary<int, (int CalibreId, DateTime Added)> _recentCalibreIdsByEditionId = new ConcurrentDictionary<int, (int CalibreId, DateTime Added)>();
         private readonly IMetadataTagService _metadataTagService;
         private readonly IMediaInfoExtractor _mediaInfoExtractor;
         private readonly IAuthorService _authorService;
@@ -1341,11 +1342,11 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                     {
                         var transferStopwatch = Stopwatch.StartNew();
                         var calibreRoot = _rootFolderService != null && _calibre != null && localBook.Author?.Path.IsNotNullOrWhiteSpace() == true
-                            ? _rootFolderService.GetBestRootFolder(Path.GetDirectoryName(localBook.Author.Path.TrimEnd(Path.DirectorySeparatorChar)))
+                            ? _rootFolderService.GetBestRootFolder(localBook.Author.Path)
                             : null;
 
-                        // Calibre manages ebooks only. Audiobooks in a mixed calibre root are plain
-                        // file transfers; pushing audio through the content server would corrupt the library.
+                        // Calibre only manages ebooks; audiobooks in a mixed calibre root are plain
+                        // file transfers.
                         var importExtension = (Path.GetExtension(bookFile.Path) ?? string.Empty).ToLowerInvariant();
                         var isAudioImport = MediaFileExtensions.AudioExtensions.Contains(importExtension);
 
@@ -1361,8 +1362,9 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                                         .Select(f => f.CalibreId)
                                         .FirstOrDefault();
                                 }
-                                catch
+                                catch (Exception ex)
                                 {
+                                    _logger.Debug(ex, "Unable to look up sibling calibre ids for edition {0}", bookFile.EditionId);
                                 }
 
                                 if (siblingCalibreId == 0 &&
@@ -1384,14 +1386,19 @@ namespace NzbDrone.Core.MediaFiles.BookImport
 
                             if (bookFile.CalibreId > 0 && bookFile.EditionId > 0)
                             {
+                                foreach (var stale in _recentCalibreIdsByEditionId.Where(p => p.Value.Added < DateTime.UtcNow.AddMinutes(-10)).Select(p => p.Key).ToList())
+                                {
+                                    _recentCalibreIdsByEditionId.TryRemove(stale, out _);
+                                }
+
                                 _recentCalibreIdsByEditionId[bookFile.EditionId] = (bookFile.CalibreId, DateTime.UtcNow);
                             }
 
                             PushCalibreIdentity(bookFile, localBook, calibreRoot.CalibreSettings);
 
-                            if (!copyOnly && calibreSource != bookFile.Path)
+                            if (!copyOnly && !calibreSource.PathEquals(bookFile.Path))
                             {
-                                File.Delete(calibreSource);
+                                _diskProvider.DeleteFile(calibreSource);
                             }
                         }
                         else if (copyOnly)
@@ -1589,10 +1596,8 @@ namespace NzbDrone.Core.MediaFiles.BookImport
             }
         }
 
-        /// <summary>
-        /// Writing a title or author moves the book, because calibre derives its folder from them.
-        /// The row is saved after this runs, so point it at where the file actually landed.
-        /// </summary>
+        // Writing a title or author moves the book, because calibre derives its folder from them.
+        // The row is saved after this runs, so point it at where the file actually landed.
         private void FollowCalibreRefile(BookFile bookFile, CalibreSettings settings)
         {
             var extension = Path.GetExtension(bookFile.Path).TrimStart('.');
@@ -1602,17 +1607,15 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 return;
             }
 
-            var moved = _calibre.GetBook(bookFile.CalibreId, settings)?.Formats?
-                .FirstOrDefault(f => f.Key.Equals(extension, StringComparison.OrdinalIgnoreCase))
-                .Value;
+            var movedPath = _calibre.GetFormatLocalPath(bookFile.CalibreId, extension, settings);
 
-            if (moved?.Path == null || moved.Path.PathEquals(bookFile.Path))
+            if (movedPath == null || movedPath.PathEquals(bookFile.Path))
             {
                 return;
             }
 
-            _logger.Debug("Calibre refiled {0} to {1} after the identity push", bookFile.Path, moved.Path);
-            bookFile.Path = moved.Path;
+            _logger.Debug("Calibre refiled {0} to {1} after the identity push", bookFile.Path, movedPath);
+            bookFile.Path = movedPath;
         }
 
         private string GetCustomFormatImportRejectionReason(LocalBook localBook, Author author, QualityProfile qualityProfile, bool downloadForced)
@@ -3630,8 +3633,9 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 var rootFolder = _rootFolderService.GetBestRootFolder(path);
                 return rootFolder != null && rootFolder.IsCalibreLibrary;
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.Debug(ex, "Unable to resolve root folder for {0}", author?.Path);
                 return false;
             }
         }

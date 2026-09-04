@@ -88,34 +88,28 @@ namespace NzbDrone.Core.MediaFiles
                 .OrderBy(e => e.ExistingPath).ToList();
         }
 
-        private bool IsCalibreManaged(Author author)
+        // The author's stored path is only ever one of the per-media-type roots, so a
+        // whole-author calibre verdict would silently skip audiobook renames for a
+        // split-media author; judge each file by the root that actually contains it.
+        private static bool IsCalibreManaged(List<RootFolder> rootFolders, string path)
         {
-            if (author == null || author.Path.IsNullOrWhiteSpace())
+            if (path.IsNullOrWhiteSpace())
             {
                 return false;
             }
 
-            try
-            {
-                var rootFolder = _rootFolderService.GetBestRootFolder(author.Path);
-                return rootFolder != null && rootFolder.IsCalibreLibrary;
-            }
-            catch (Exception ex)
-            {
-                _logger.Debug(ex, "Unable to resolve root folder for {0}", author.Path);
-                return false;
-            }
+            var bestRoot = rootFolders
+                .Where(r => r.Path.IsNotNullOrWhiteSpace() && (r.Path.PathEquals(path) || r.Path.IsParentPath(path)))
+                .OrderByDescending(r => r.Path.Length)
+                .FirstOrDefault();
+
+            return bestRoot?.IsCalibreLibrary == true;
         }
 
         private IEnumerable<RenameBookFilePreview> GetPreviews(Author author, List<BookFile> files, bool moveToCanonicalAuthorFolder)
         {
-            if (IsCalibreManaged(author))
-            {
-                _logger.Debug("{0} is in a calibre library; calibre owns the file layout", author.Name);
-                yield break;
-            }
-
-            var renameFiles = files.Where(x => x.CalibreId == 0).ToList();
+            var rootFolders = _rootFolderService.All();
+            var renameFiles = files.Where(x => x.CalibreId == 0 && !IsCalibreManaged(rootFolders, x.Path)).ToList();
             EnsurePartNumbers(renameFiles);
             // Pass 1: compute target directories for audiobook files that are part of this rename batch.
             var batchContext = new RenameBatchContext();
@@ -266,16 +260,12 @@ namespace NzbDrone.Core.MediaFiles
             var cleanupCandidates = new List<(string PreviousPath, string SourceAuthorFolderPath)>();
             var canonicalMoves = new List<(string MediaType, string SourceAuthorFolderPath, string DestinationAuthorFolderPath)>();
 
-            if (IsCalibreManaged(author))
-            {
-                _logger.Debug("{0} is in a calibre library; skipping rename", author.Name);
-                return result;
-            }
+            var rootFolders = _rootFolderService.All();
 
             // Don't rename Calibre files.
             // Ensure audiobook files are renamed first so mixed-root ebook colocation can clamp to the updated audiobook folders.
             var ordered = filesToRename
-                .Where(x => x.CalibreId == 0)
+                .Where(x => x.CalibreId == 0 && !IsCalibreManaged(rootFolders, x.Path))
                 .OrderBy(x =>
                 {
                     var mt = x.MediaType;

@@ -1543,12 +1543,13 @@ namespace NzbDrone.Core.Books
             }
 
             if (!string.IsNullOrWhiteSpace(book.UnitKeyHash) &&
-                (HasKnownFiles(book) || book.Added > DateTime.UtcNow.AddMinutes(-15)))
+                (HasKnownFiles(book) || book.Added > DateTime.UtcNow.AddHours(-24)))
             {
                 // UnitKeyHash is the durable identity of an intentional multi-copy row while its
                 // physical copy exists; the grace window covers a fresh clone whose files are still
-                // attaching. A file-less clone past that window is leftover from a deleted copy and
-                // may be merged away as a duplicate.
+                // attaching or converting, which can take hours on a backlogged queue. A file-less
+                // clone past that window is leftover from a deleted copy and may be merged away as
+                // a duplicate.
                 return true;
             }
 

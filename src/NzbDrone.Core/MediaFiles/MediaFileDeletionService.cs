@@ -278,8 +278,33 @@ namespace NzbDrone.Core.MediaFiles
                         continue;
                     }
 
-                    // For calibre folders the sync handler has already deleted the calibre-tracked books;
-                    // this removes whatever remains (audiobooks, replicas, leftovers) via the recycle bin.
+                    var deleteRootFolder = _rootFolderService.GetBestRootFolder(folder);
+
+                    if (deleteRootFolder?.IsCalibreLibrary == true && deleteRootFolder.CalibreSettings != null)
+                    {
+                        // The sync handler already deleted the calibre records Chaptarr tracked, but
+                        // the folder can still hold books calibre knows and Chaptarr never imported;
+                        // recycling those would leave calibre records pointing at nothing. Remove only
+                        // the tracked leftovers (audiobooks, replicas) and leave the folder to calibre.
+                        foreach (var trackedFile in (_mediaFileService.GetFilesWithBasePath(folder) ?? new List<BookFile>())
+                                     .Where(f => f.Path.IsNotNullOrWhiteSpace()))
+                        {
+                            try
+                            {
+                                if (_diskProvider.FileExistsCanonical(trackedFile.Path))
+                                {
+                                    _recycleBinProvider.DeleteFile(trackedFile.Path);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.Warn(ex, "Unable to delete {0} for deleted author {1}", trackedFile.Path, author.Name);
+                            }
+                        }
+
+                        continue;
+                    }
+
                     if (_diskProvider.FolderExists(folder))
                     {
                         _recycleBinProvider.DeleteFolder(folder);

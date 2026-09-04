@@ -6,6 +6,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using NLog;
+using NzbDrone.Common.Disk;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Books;
 using NzbDrone.Core.RootFolders;
@@ -29,6 +30,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
         private readonly IMainDatabase _mainDatabase;
         private readonly IRootFolderService _rootFolderService;
         private readonly IAuthorService _authorService;
+        private readonly IDiskProvider _diskProvider;
         private readonly Logger _logger;
 
         // Cache per canonical book + unit so we don't create multiple clones for the same physical unit.
@@ -42,6 +44,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             IMainDatabase mainDatabase,
             IRootFolderService rootFolderService,
             IAuthorService authorService,
+            IDiskProvider diskProvider,
             Logger logger)
         {
             _mediaFileService = mediaFileService;
@@ -50,6 +53,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             _mainDatabase = mainDatabase;
             _rootFolderService = rootFolderService;
             _authorService = authorService;
+            _diskProvider = diskProvider;
             _logger = logger;
         }
 
@@ -163,7 +167,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
 
             // Rows whose files are gone from disk (e.g. the book was just deleted in calibre and re-uploaded
             // before cleanup ran) are not evidence of another physical copy and must not force a unit clone.
-            var staleRowCount = existingFiles.RemoveAll(f => string.IsNullOrWhiteSpace(f?.Path) || !File.Exists(f.Path));
+            var staleRowCount = existingFiles.RemoveAll(f => string.IsNullOrWhiteSpace(f?.Path) || !_diskProvider.FileExists(f.Path));
             if (staleRowCount > 0)
             {
                 _logger.Debug("[UNIT-DEST] Ignored {0} tracked files missing from disk on BookId={1} while resolving unit destination", staleRowCount, canonicalBook.Id);
@@ -228,13 +232,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                     // The book handed to the resolver often has its Author lazy-unset;
                     // load it so a calibre-library book is still recognized (otherwise the
                     // clone guard silently no-ops and a duplicate row gets created).
-                    try
-                    {
-                        path = _authorService.GetAuthor(book.AuthorId)?.Path;
-                    }
-                    catch
-                    {
-                    }
+                    path = _authorService.GetAuthor(book.AuthorId)?.Path;
                 }
 
                 if (path.IsNullOrWhiteSpace())
@@ -245,8 +243,9 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                 var rootFolder = _rootFolderService.GetBestRootFolder(path);
                 return rootFolder != null && rootFolder.IsCalibreLibrary;
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.Debug(ex, "Unable to determine whether book {0} is in a calibre library", book?.Id);
                 return false;
             }
         }

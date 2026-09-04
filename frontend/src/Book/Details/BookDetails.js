@@ -1,5 +1,5 @@
 import PropTypes from 'prop-types';
-import React, { Component } from 'react';
+import React, { Component, Fragment } from 'react';
 import { Tab, TabList, TabPanel, Tabs } from 'react-tabs';
 import AuthorHistoryTable from 'Author/History/AuthorHistoryTable';
 import DeleteBookModal from 'Book/Delete/DeleteBookModal';
@@ -192,20 +192,18 @@ class BookDetails extends Component {
 
             {
               showPushToCalibre ?
-                <PageToolbarButton
-                  label={translate('CalibrePush')}
-                  title={translate('PushMetadataToCalibre')}
-                  iconName={icons.TAGS}
-                  isDisabled={!hasBookFiles}
-                  isSpinning={isPushingToCalibre}
-                  onPress={this.onCalibrePushPress}
-                /> :
-                null
-            }
+                <Fragment>
+                  <PageToolbarButton
+                    label={translate('CalibrePush')}
+                    title={translate('PushMetadataToCalibre')}
+                    iconName={icons.TAGS}
+                    isDisabled={!hasBookFiles}
+                    isSpinning={isPushingToCalibre}
+                    onPress={this.onCalibrePushPress}
+                  />
 
-            {
-              showPushToCalibre ?
-                <PageToolbarSeparator /> :
+                  <PageToolbarSeparator />
+                </Fragment> :
                 null
             }
 
@@ -407,14 +405,14 @@ class BookDetails extends Component {
           />
 
           <CalibrePushModal
-          isOpen={this.state.isCalibrePushModalOpen}
-          bookCount={1}
-          previewValues={this.props.calibrePreview}
-          onPushPress={this.onCalibrePushConfirmed}
-          onModalClose={this.onCalibrePushModalClose}
-        />
+            isOpen={this.state.isCalibrePushModalOpen}
+            bookCount={1}
+            previewValues={this.props.calibrePreview}
+            onPushPress={this.onCalibrePushConfirmed}
+            onModalClose={this.onCalibrePushModalClose}
+          />
 
-        <DeleteBookModal
+          <DeleteBookModal
             isOpen={isDeleteBookModalOpen}
             bookId={id}
             authorId={author.id}

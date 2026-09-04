@@ -39,16 +39,6 @@ namespace NzbDrone.Core.Books.Calibre
                 .FirstOrDefault();
         }
 
-        public static HashSet<string> KnownSeriesTitles(Book book)
-        {
-            var titles = book?.SeriesLinks?
-                .Select(x => x?.Series?.Value?.Title)
-                .Where(t => t.IsNotNullOrWhiteSpace())
-                .ToList() ?? new List<string>();
-
-            return new HashSet<string>(titles, StringComparer.OrdinalIgnoreCase);
-        }
-
         private static HashSet<string> Tokenize(string value)
         {
             var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

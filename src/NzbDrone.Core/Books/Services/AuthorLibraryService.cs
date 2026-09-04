@@ -1859,7 +1859,7 @@ namespace NzbDrone.Core.Books.Services
             author.SyncMonitoredAcrossFormats ??= rootFolder.DefaultSyncMonitoredAcrossFormats;
         }
 
-        private static MediaTypeSettings ParseMediaTypeSettings(string json)
+        private MediaTypeSettings ParseMediaTypeSettings(string json)
         {
             if (json.IsNullOrWhiteSpace())
             {
@@ -1870,8 +1870,9 @@ namespace NzbDrone.Core.Books.Services
             {
                 return Json.Deserialize<MediaTypeSettings>(json);
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.Debug(ex, "Unable to parse root folder media type defaults");
                 return null;
             }
         }

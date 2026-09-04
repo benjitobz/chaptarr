@@ -42,9 +42,8 @@ const selectBookFiles = createSelector(
   }
 );
 
-
 function titleCase(value) {
-  return String(value).replace(/-/g, ' ').replace(/\w/g, (c) => c.toUpperCase());
+  return String(value).replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function buildCalibrePreview(book, author, edition) {
@@ -87,7 +86,8 @@ function createMapStateToProps() {
     createCommandsSelector(),
     createUISettingsSelector(),
     createDimensionsSelector(),
-    (bookId, bookFiles, books, editions, authors, commands, uiSettings, dimensions) => {
+    (state) => state.settings.rootFolders.items,
+    (bookId, bookFiles, books, editions, authors, commands, uiSettings, dimensions, rootFolders) => {
       try {
         const book = books.items.find((b) => b.id === bookId);
 
@@ -142,6 +142,13 @@ function createMapStateToProps() {
         isSearchingCommand.body.bookIds &&
         isSearchingCommand.body.bookIds.indexOf(book.id) > -1
         );
+        const pushCommand = findCommand(commands, { name: commandNames.PUSH_CALIBRE_METADATA });
+        const isPushingToCalibre = !!(
+          pushCommand &&
+        isCommandExecuting(pushCommand) &&
+        pushCommand.body &&
+        (pushCommand.body.bookIds || []).includes(book.id)
+        );
         const isRenamingFiles = isCommandExecuting(findCommand(commands, { name: commandNames.RENAME_FILES, authorId: author.id }));
         const isRenamingAuthorCommand = findCommand(commands, { name: commandNames.RENAME_AUTHOR });
         const isRenamingAuthor = (
@@ -175,6 +182,8 @@ function createMapStateToProps() {
           shortDateFormat: uiSettings.shortDateFormat,
           author,
           calibrePreview: buildCalibrePreview(book, author, selectedEdition),
+          showPushToCalibre: rootFolders.some((f) => f.isCalibreLibrary && isUnderPath(author.path || '', f.path)),
+          isPushingToCalibre,
           isRefreshing,
           isSearching,
           isRenamingFiles,
@@ -196,33 +205,6 @@ function createMapStateToProps() {
       }
     }
   );
-}
-
-function createMergedMapStateToProps() {
-  const selectProps = createMapStateToProps();
-
-  return (state, props) => {
-    const innerProps = selectProps(state, props);
-
-    if (!innerProps || !innerProps.author) {
-      return innerProps;
-    }
-
-    const rootFolders = state.settings.rootFolders.items;
-    const authorPath = innerProps.author.path || '';
-    const pushCommand = findCommand(state.commands.items, { name: commandNames.PUSH_CALIBRE_METADATA });
-
-    return {
-      ...innerProps,
-      showPushToCalibre: rootFolders.some((f) => f.isCalibreLibrary && authorPath.startsWith(f.path)),
-      isPushingToCalibre: !!(
-        pushCommand &&
-        isCommandExecuting(pushCommand) &&
-        pushCommand.body &&
-        (pushCommand.body.bookIds || []).includes(innerProps.id)
-      )
-    };
-  };
 }
 
 const mapDispatchToProps = {
@@ -374,4 +356,4 @@ BookDetailsConnector.propTypes = {
   executeCommand: PropTypes.func.isRequired
 };
 
-export default connect(createMergedMapStateToProps, mapDispatchToProps)(BookDetailsConnector);
+export default connect(createMapStateToProps, mapDispatchToProps)(BookDetailsConnector);

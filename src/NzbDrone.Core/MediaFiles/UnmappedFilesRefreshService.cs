@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Linq;
 using NLog;
 using NzbDrone.Common.Extensions;
@@ -12,6 +13,7 @@ namespace NzbDrone.Core.MediaFiles
     public class UnmappedFilesRefreshService : IHandle<AuthorScannedEvent>
     {
         private static readonly TimeSpan RefreshCooldown = TimeSpan.FromMinutes(30);
+        private static readonly ConcurrentDictionary<int, string> AttemptedSignatures = new ConcurrentDictionary<int, string>();
 
         private readonly IMediaFileService _mediaFileService;
         private readonly IManageCommandQueue _commandQueueManager;
@@ -51,6 +53,17 @@ namespace NzbDrone.Core.MediaFiles
             {
                 return;
             }
+
+            var signature = string.Join("|", unmapped.Select(f => f.Path).OrderBy(p => p, StringComparer.OrdinalIgnoreCase));
+
+            if (AttemptedSignatures.TryGetValue(author.Id, out var previousSignature) && previousSignature == signature)
+            {
+                // A refresh already retried exactly these files; repeating it on every scan
+                // would hammer the metadata server for files that will never match.
+                return;
+            }
+
+            AttemptedSignatures[author.Id] = signature;
 
             // Files matching no catalog entry usually mean the work's row was deleted
             // and not yet recreated; a refresh rebuilds the catalog and its rescan

@@ -36,6 +36,7 @@ namespace NzbDrone.Core.Books.Calibre
         Dictionary<int, string> GetBookTitlesUnderPath(string localPathPrefix, CalibreSettings settings);
         void DeleteBookIds(List<int> calibreIds, CalibreSettings settings);
         int GetCalibreIdForPath(string path, CalibreSettings settings);
+        string GetFormatLocalPath(int calibreId, string extension, CalibreSettings settings);
         CalibreBook GetBook(int calibreId, CalibreSettings settings);
         List<CalibreBook> GetBooks(List<int> calibreId, CalibreSettings settings);
         List<CalibreBook> GetAllBooks(CalibreSettings settings);
@@ -655,6 +656,25 @@ namespace NzbDrone.Core.Books.Calibre
             return book?.Id ?? 0;
         }
 
+        public string GetFormatLocalPath(int calibreId, string extension, CalibreSettings settings)
+        {
+            if (calibreId == 0 || extension.IsNullOrWhiteSpace())
+            {
+                return null;
+            }
+
+            var format = GetBook(calibreId, settings)?.Formats?
+                .FirstOrDefault(f => f.Key.Equals(extension, StringComparison.OrdinalIgnoreCase))
+                .Value;
+
+            if (format?.Path == null)
+            {
+                return null;
+            }
+
+            return _pathMapper.RemapRemoteToLocal(settings.Host, new OsPath(format.Path)).FullPath;
+        }
+
         public Dictionary<int, string> GetBookTitlesUnderPath(string localPathPrefix, CalibreSettings settings)
         {
             var result = new Dictionary<int, string>();
@@ -664,45 +684,28 @@ namespace NzbDrone.Core.Books.Calibre
                 return result;
             }
 
-            var ids = GetAllBookIds(settings);
-            var offset = 0;
-
-            while (offset < ids.Count)
+            foreach (var book in GetAllBooks(settings))
             {
-                var builder = GetBuilder($"ajax/books/{settings.Library}", settings);
-                builder.LogResponseContent = false;
-                builder.AddQueryParam("ids", ids.Skip(offset).Take(PAGE_SIZE).ConcatToString(","));
-
-                var request = builder.Build();
-                var response = _httpClient.Get<Dictionary<int, CalibreBook>>(request);
-
-                foreach (var pair in response.Resource)
+                if (book?.Formats == null)
                 {
-                    var formats = pair.Value?.Formats;
+                    continue;
+                }
 
-                    if (formats == null)
+                foreach (var format in book.Formats.Values)
+                {
+                    if (format?.Path == null)
                     {
                         continue;
                     }
 
-                    foreach (var format in formats.Values)
+                    var localPath = _pathMapper.RemapRemoteToLocal(settings.Host, new OsPath(format.Path)).FullPath;
+
+                    if (localPath.StartsWith(localPathPrefix, StringComparison.OrdinalIgnoreCase))
                     {
-                        if (format?.Path == null)
-                        {
-                            continue;
-                        }
-
-                        var localPath = _pathMapper.RemapRemoteToLocal(settings.Host, new OsPath(format.Path)).FullPath;
-
-                        if (localPath.StartsWith(localPathPrefix, StringComparison.OrdinalIgnoreCase))
-                        {
-                            result[pair.Key] = pair.Value.Title;
-                            break;
-                        }
+                        result[book.Id] = book.Title;
+                        break;
                     }
                 }
-
-                offset += PAGE_SIZE;
             }
 
             return result;

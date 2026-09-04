@@ -12,7 +12,7 @@ import { icons, kinds } from 'Helpers/Props';
 import translate from 'Utilities/String/translate';
 import styles from './CalibrePushModalContent.css';
 
-export const calibreFields = [
+const calibreFields = [
   { name: 'cover', label: 'Cover' },
   { name: 'title', label: 'Title', movesFiles: true },
   { name: 'authors', label: 'Author', movesFiles: true },

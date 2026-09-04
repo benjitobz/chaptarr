@@ -133,11 +133,9 @@ namespace NzbDrone.Core.Books.Calibre
             }
         }
 
-        /// <summary>
-        /// Cover downloads are deferred during an import, so the push that runs when a file is
-        /// picked up finds no cover on disk yet and silently sends everything but the artwork.
-        /// The cover lands a moment later - send it then, for root folders that push automatically.
-        /// </summary>
+        // Cover downloads are deferred during an import, so the push that runs when a file is
+        // picked up finds no cover on disk yet and silently sends everything but the artwork.
+        // The cover lands a moment later - send it then, for root folders that push automatically.
         public void Handle(MediaCoversUpdatedEvent message)
         {
             var book = message.Book;
@@ -265,8 +263,7 @@ namespace NzbDrone.Core.Books.Calibre
 
             foreach (var calibreId in calibreIds)
             {
-                var reference = files.FirstOrDefault(f => f.CalibreId == calibreId) ?? files.First();
-                reference.CalibreId = calibreId;
+                var reference = files.First(f => f.CalibreId == calibreId);
                 var written = _calibreProxy.SetSelectedFields(reference, fields, settings);
 
                 if (written.Any())
@@ -290,50 +287,41 @@ namespace NzbDrone.Core.Books.Calibre
             return book;
         }
 
-        /// <summary>
-        /// Calibre derives a book's folder from its title and author, so writing either one moves the
-        /// files. Nothing tells Chaptarr, and the next disk scan reads the folder it still points at
-        /// as a deletion - unlinking the book and cascading that delete out to every connection.
-        /// Follow the move instead.
-        /// </summary>
+        // Calibre derives a book's folder from its title and author, so writing either one moves the
+        // files. Nothing tells Chaptarr, and the next disk scan reads the folder it still points at
+        // as a deletion - unlinking the book and cascading that delete out to every connection.
+        // Follow the move instead.
         private void FollowCalibreRefile(List<BookFile> files, CalibreSettings settings)
         {
-            foreach (var group in files.Where(f => f.CalibreId > 0).GroupBy(f => f.CalibreId))
+            foreach (var file in files.Where(f => f.CalibreId > 0))
             {
-                CalibreBook updated;
+                var extension = Path.GetExtension(file.Path).TrimStart('.');
 
-                try
+                if (extension.IsNullOrWhiteSpace())
                 {
-                    updated = _calibreProxy.GetBook(group.Key, settings);
-                }
-                catch (Exception ex)
-                {
-                    _logger.Debug(ex, "Unable to read calibre record {0} back after pushing identity fields", group.Key);
                     continue;
                 }
 
-                foreach (var file in group)
+                string movedPath;
+
+                try
                 {
-                    var extension = Path.GetExtension(file.Path).TrimStart('.');
-
-                    if (extension.IsNullOrWhiteSpace() || updated?.Formats == null)
-                    {
-                        continue;
-                    }
-
-                    var moved = updated.Formats
-                        .FirstOrDefault(f => f.Key.Equals(extension, StringComparison.OrdinalIgnoreCase))
-                        .Value;
-
-                    if (moved?.Path == null || moved.Path.PathEquals(file.Path))
-                    {
-                        continue;
-                    }
-
-                    _logger.Info("Calibre refiled '{0}' to '{1}'", file.Path, moved.Path);
-                    file.Path = moved.Path;
-                    _mediaFileService.Update(file);
+                    movedPath = _calibreProxy.GetFormatLocalPath(file.CalibreId, extension, settings);
                 }
+                catch (Exception ex)
+                {
+                    _logger.Debug(ex, "Unable to read calibre record {0} back after pushing identity fields", file.CalibreId);
+                    continue;
+                }
+
+                if (movedPath == null || movedPath.PathEquals(file.Path))
+                {
+                    continue;
+                }
+
+                _logger.Info("Calibre refiled '{0}' to '{1}'", file.Path, movedPath);
+                file.Path = movedPath;
+                _mediaFileService.Update(file);
             }
         }
 

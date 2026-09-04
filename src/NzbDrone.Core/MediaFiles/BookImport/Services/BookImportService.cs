@@ -9,11 +9,9 @@ using NzbDrone.Common.Disk;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Books;
 using NzbDrone.Core.Datastore;
-using NzbDrone.Core.IndexerSearch;
 using NzbDrone.Core.MediaFiles.BookImport.Aggregation;
 using NzbDrone.Core.MediaFiles.Events;
 using NzbDrone.Core.Qualities;
-using NzbDrone.Core.Messaging.Commands;
 using NzbDrone.Core.Messaging.Events;
 using NzbDrone.Core.Parser.Model;
 using NzbDrone.Core.Authors;
@@ -33,7 +31,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
         private readonly IMediaInfoExtractor _mediaInfoExtractor;
         private readonly IEventAggregator _eventAggregator;
         private readonly IAuthorService _authorService;
-        private readonly IManageCommandQueue _commandQueueManager;
         private readonly Logger _logger;
 
         public BookImportService(
@@ -47,7 +44,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             IEventAggregator eventAggregator,
             NzbDrone.Core.Configuration.IConfigService configService,
             IAuthorService authorService,
-            IManageCommandQueue commandQueueManager,
             Logger logger)
         {
             _bookService = bookService;
@@ -60,7 +56,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             _eventAggregator = eventAggregator;
             _configService = configService;
             _authorService = authorService;
-            _commandQueueManager = commandQueueManager;
             _logger = logger;
         }
 
@@ -922,43 +917,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             return book?.MediaType == BookMediaType.Audiobook ? "audiobook" : "ebook";
         }
 
-        private void QueueSiblingSearch(Book book)
-        {
-            try
-            {
-                if (book.AuthorId <= 0)
-                {
-                    return;
-                }
-
-                var siblingType = book.MediaType == BookMediaType.Audiobook ? BookMediaType.Ebook : BookMediaType.Audiobook;
-                var sibling = _bookService.GetBooksByAuthor(book.AuthorId)
-                    .Where(b => b != null && b.Id != book.Id && b.MediaType == siblingType)
-                    .FirstOrDefault(b => BookIdentity.MatchesByProviderIdIntersection(b, book));
-
-                if (sibling == null)
-                {
-                    return;
-                }
-
-                var siblingMonitored = sibling.MediaType == BookMediaType.Audiobook ? sibling.AudiobookMonitored : sibling.EbookMonitored;
-
-                if (!siblingMonitored || _mediaFileService.GetFilesByBook(sibling.Id).Any())
-                {
-                    return;
-                }
-
-                _commandQueueManager.Push(new BookSearchCommand { BookIds = new List<int> { sibling.Id } });
-                _logger.Info("Queued a search for the missing {0} of '{1}' after cross-format monitoring",
-                    siblingType == BookMediaType.Audiobook ? "audiobook" : "ebook",
-                    book.Title);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn(ex, "Unable to queue a sibling search for '{0}'", book?.Title);
-            }
-        }
-
         private void EnsureBookMonitored(Book book)
         {
             try
@@ -990,8 +948,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                 }
 
                 _logger.Debug("Monitored '{0}' ({1}) after attaching a library file", book.Title, mediaType);
-
-                QueueSiblingSearch(book);
             }
             catch (Exception ex)
             {

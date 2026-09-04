@@ -87,13 +87,15 @@ namespace NzbDrone.Core.Books.Calibre
                 return;
             }
 
+            var canonicalIdSet = new HashSet<int>(canonicalIds);
+
             foreach (var canonicalId in canonicalIds)
             {
-                ReapDuplicateRecords(canonicalId, libraryBooks, rootFolder.CalibreSettings);
+                ReapDuplicateRecords(canonicalId, canonicalIdSet, libraryBooks, rootFolder.CalibreSettings);
             }
         }
 
-        private void ReapDuplicateRecords(int canonicalId, List<CalibreBook> libraryBooks, CalibreSettings settings)
+        private void ReapDuplicateRecords(int canonicalId, ISet<int> canonicalIds, List<CalibreBook> libraryBooks, CalibreSettings settings)
         {
             if (libraryBooks == null || libraryBooks.Count == 0)
             {
@@ -120,7 +122,7 @@ namespace NzbDrone.Core.Books.Calibre
 
             foreach (var candidate in libraryBooks)
             {
-                if (candidate == null || candidate.Id == canonicalId)
+                if (candidate == null || candidate.Id == canonicalId || canonicalIds.Contains(candidate.Id))
                 {
                     continue;
                 }
@@ -169,8 +171,25 @@ namespace NzbDrone.Core.Books.Calibre
                 return false;
             }
 
-            return candidateTitle.Equals(canonicalTitle, StringComparison.Ordinal) ||
-                   candidateTitle.EndsWith(" " + canonicalTitle, StringComparison.Ordinal);
+            if (candidateTitle.Equals(canonicalTitle, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (!candidateTitle.EndsWith(" " + canonicalTitle, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            // A branded variant is "Author Name Title"; a prefix made of anything else
+            // ("Second" in "Second Foundation") is a different book, not a duplicate.
+            var prefixTokens = candidateTitle
+                .Substring(0, candidateTitle.Length - canonicalTitle.Length)
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            var authorTokens = AuthorTokens(candidate);
+
+            return prefixTokens.All(token => token.Length <= 1 || authorTokens.Contains(token));
         }
 
         private static HashSet<string> AuthorTokens(CalibreBook book)

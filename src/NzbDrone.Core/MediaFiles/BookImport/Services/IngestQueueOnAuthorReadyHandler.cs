@@ -59,8 +59,9 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                 {
                     tracked = _mediaFileService.GetFileWithPath(path);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    _logger.Debug(ex, "Unable to look up tracked file for {0}", path);
                 }
 
                 if (tracked == null || tracked.EditionId <= 0)
@@ -84,6 +85,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                 matchedPaths?.Add(path);
                 return true;
             }
+
             private sealed class AuthorIngestGate : IDisposable
             {
                 public SemaphoreSlim Semaphore { get; } = new SemaphoreSlim(1, 1);
