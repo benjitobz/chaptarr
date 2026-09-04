@@ -143,7 +143,8 @@ namespace NzbDrone.Core.MediaFiles
                     }
                     else
                     {
-                        _logger.Debug("Skipping scan for absent folder {0}; root folder {1} is available.", folder, rootFolder.Path);
+                        _logger.Info("Folder {0} no longer exists but root folder {1} is available; cleaning up its tracked files.", folder, rootFolder.Path);
+                        CleanMediaFiles(folder, new List<string>(), rootFolder);
                     }
 
                     continue;
@@ -183,7 +184,7 @@ namespace NzbDrone.Core.MediaFiles
                     {
                         _logger.Warn("Skipping scan cleanup for {0} because file enumeration did not complete safely", folder);
                     }
-                    else if (!result.ScannedFilePaths.Any())
+                    else if (!result.ScannedFilePaths.Any() && !(rootFolder.IsCalibreLibrary && rootFolder.CalibreSettings != null))
                     {
                         _logger.Warn("Skipping scan cleanup for {0} because the scan found no media files. This avoids wiping tracked files when a mount is visible but empty.", folder);
                     }

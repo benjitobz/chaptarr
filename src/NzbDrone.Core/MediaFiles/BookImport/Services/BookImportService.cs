@@ -9,9 +9,11 @@ using NzbDrone.Common.Disk;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Books;
 using NzbDrone.Core.Datastore;
+using NzbDrone.Core.IndexerSearch;
 using NzbDrone.Core.MediaFiles.BookImport.Aggregation;
 using NzbDrone.Core.MediaFiles.Events;
 using NzbDrone.Core.Qualities;
+using NzbDrone.Core.Messaging.Commands;
 using NzbDrone.Core.Messaging.Events;
 using NzbDrone.Core.Parser.Model;
 using NzbDrone.Core.Authors;
@@ -31,6 +33,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
         private readonly IMediaInfoExtractor _mediaInfoExtractor;
         private readonly IEventAggregator _eventAggregator;
         private readonly IAuthorService _authorService;
+        private readonly IManageCommandQueue _commandQueueManager;
         private readonly Logger _logger;
 
         public BookImportService(
@@ -44,6 +47,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             IEventAggregator eventAggregator,
             NzbDrone.Core.Configuration.IConfigService configService,
             IAuthorService authorService,
+            IManageCommandQueue commandQueueManager,
             Logger logger)
         {
             _bookService = bookService;
@@ -56,6 +60,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             _eventAggregator = eventAggregator;
             _configService = configService;
             _authorService = authorService;
+            _commandQueueManager = commandQueueManager;
             _logger = logger;
         }
 
@@ -349,6 +354,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
 	                        existing.Author = book.Author;
 	                        RefreshTrackedFileMetadata(existing, file, book);
                         ApplySuccessfulMatchState(existing, provenance, book.Author, book, targetEdition);
+                        EnsureBookMonitored(book);
 
 	                        _mediaFileService.Update(existing);
 
@@ -700,6 +706,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                     existingFile.Part = assignment.Part;
                     RefreshTrackedFileMetadata(existingFile, file, book, assignment.PartCount);
                     ApplySuccessfulMatchState(existingFile, request.Provenance, author, book, edition);
+                    EnsureBookMonitored(book);
 
                     pendingUpdates.Add((existingFile, file.Path, edition.Id, assignment.Part, previousEditionId <= 0 && edition.Id > 0, false, null, edition));
                 }
@@ -915,6 +922,83 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             return book?.MediaType == BookMediaType.Audiobook ? "audiobook" : "ebook";
         }
 
+        private void QueueSiblingSearch(Book book)
+        {
+            try
+            {
+                if (book.AuthorId <= 0)
+                {
+                    return;
+                }
+
+                var siblingType = book.MediaType == BookMediaType.Audiobook ? BookMediaType.Ebook : BookMediaType.Audiobook;
+                var sibling = _bookService.GetBooksByAuthor(book.AuthorId)
+                    .Where(b => b != null && b.Id != book.Id && b.MediaType == siblingType)
+                    .FirstOrDefault(b => BookIdentity.MatchesByProviderIdIntersection(b, book));
+
+                if (sibling == null)
+                {
+                    return;
+                }
+
+                var siblingMonitored = sibling.MediaType == BookMediaType.Audiobook ? sibling.AudiobookMonitored : sibling.EbookMonitored;
+
+                if (!siblingMonitored || _mediaFileService.GetFilesByBook(sibling.Id).Any())
+                {
+                    return;
+                }
+
+                _commandQueueManager.Push(new BookSearchCommand { BookIds = new List<int> { sibling.Id } });
+                _logger.Info("Queued a search for the missing {0} of '{1}' after cross-format monitoring",
+                    siblingType == BookMediaType.Audiobook ? "audiobook" : "ebook",
+                    book.Title);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, "Unable to queue a sibling search for '{0}'", book?.Title);
+            }
+        }
+
+        private void EnsureBookMonitored(Book book)
+        {
+            try
+            {
+                if (book == null || book.Id <= 0)
+                {
+                    return;
+                }
+
+                var alreadyMonitored = book.MediaType == BookMediaType.Audiobook ? book.AudiobookMonitored : book.EbookMonitored;
+                if (alreadyMonitored)
+                {
+                    return;
+                }
+
+                var mediaType = book.MediaType == BookMediaType.Audiobook ? "audiobook" : "ebook";
+
+                // SetBookMonitored is the cross-format-synchronized mutation surface: with the
+                // author's sync flag on, monitoring this row also monitors its sibling format.
+                _bookService.SetBookMonitored(book.Id, true);
+
+                if (book.MediaType == BookMediaType.Audiobook)
+                {
+                    book.AudiobookMonitored = true;
+                }
+                else
+                {
+                    book.EbookMonitored = true;
+                }
+
+                _logger.Debug("Monitored '{0}' ({1}) after attaching a library file", book.Title, mediaType);
+
+                QueueSiblingSearch(book);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, "Unable to monitor book '{0}' after attaching a file", book?.Title);
+            }
+        }
+
         private bool ApplySuccessfulMatchState(
             BookFile persisted,
             MatchProvenance provenance,
@@ -977,6 +1061,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                     return;
                 }
 
+                EnsureBookMonitored(book);
                 if (ApplySuccessfulMatchState(persisted, provenance, author, book, edition))
                 {
                     _mediaFileService.Update(persisted);

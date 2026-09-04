@@ -27,6 +27,7 @@ using NzbDrone.Core.Extras;
 using NzbDrone.Core.History;
 using NzbDrone.Core.Instrumentation;
 using NzbDrone.Core.MediaFiles; // for IMoveBookFiles
+using NzbDrone.Core.RootFolders;
 using NzbDrone.Core.MediaFiles.Events;
 using NzbDrone.Core.MediaFiles.BookImport.Services;
 using NzbDrone.Core.MediaCover;
@@ -67,6 +68,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport
         }
 
         private readonly IMediaFileService _mediaFileService;
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<int, (int CalibreId, DateTime Added)> _recentCalibreIdsByEditionId = new System.Collections.Concurrent.ConcurrentDictionary<int, (int CalibreId, DateTime Added)>();
         private readonly IMetadataTagService _metadataTagService;
         private readonly IMediaInfoExtractor _mediaInfoExtractor;
         private readonly IAuthorService _authorService;
@@ -86,6 +88,8 @@ namespace NzbDrone.Core.MediaFiles.BookImport
             private readonly IConversionTrackingService _conversionTrackingService;
             private readonly IConversionJobService _conversionJobService;
             private readonly IDiskProvider _diskProvider;
+            private readonly IRootFolderService _rootFolderService;
+            private readonly ICalibreProxy _calibre;
             private readonly IConfigService _configService;
             private readonly IContainmentValidator _containmentValidator;
             private readonly IMapCoversToLocal _coverMapper;
@@ -117,7 +121,9 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 IContainmentValidator containmentValidator = null,
                 IMapCoversToLocal coverMapper = null,
                 ICustomFormatCalculationService customFormatCalculationService = null,
-                IConversionJobService conversionJobService = null)
+                IConversionJobService conversionJobService = null,
+                IRootFolderService rootFolderService = null,
+                ICalibreProxy calibre = null)
             {
             _mediaFileService = mediaFileService;
             _metadataTagService = metadataTagService;
@@ -143,6 +149,8 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 _containmentValidator = containmentValidator;
                 _coverMapper = coverMapper;
                 _customFormatCalculationService = customFormatCalculationService;
+                _rootFolderService = rootFolderService;
+                _calibre = calibre;
                 _logger = logger;
             }
 
@@ -475,11 +483,25 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                             continue;
                         }
 
-                        // These are NEW files for the same book - create a new book instance for multiple copies
-                        _logger.Debug("[ADDITIONAL-COPY] Creating new book instance for additional physical copy of '{0}'",
-                            book.Title);
-                        var createResult = CreateNewBookInstanceForBatch(bookDecisions.First(), book, author, anyEditionOk: true);
-                            if (createResult.NewBook != null)
+                        // These are NEW files for the same book - create a new book instance for multiple copies.
+                        // Calibre keeps every format of a book on a single record, so an extra copy row
+                        // fragments the library: the canonicalizer later reaps the surplus calibre record
+                        // and leaves the copy stranded in Chaptarr with files that no longer exist.
+                        BatchBookResult createResult = null;
+
+                        if (IsCalibreLibraryAuthor(author))
+                        {
+                            _logger.Debug("[ADDITIONAL-COPY] Calibre library owns multi-format grouping; importing '{0}' against the existing book instead of creating a copy",
+                                book.Title);
+                        }
+                        else
+                        {
+                            _logger.Debug("[ADDITIONAL-COPY] Creating new book instance for additional physical copy of '{0}'",
+                                book.Title);
+                            createResult = CreateNewBookInstanceForBatch(bookDecisions.First(), book, author, anyEditionOk: true);
+                        }
+
+                            if (createResult?.NewBook != null)
                             {
                                 newBookInstance = createResult.NewBook;
                                 newEdition = createResult.NewEdition;
@@ -1318,7 +1340,61 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                     try
                     {
                         var transferStopwatch = Stopwatch.StartNew();
-                        if (copyOnly)
+                        var calibreRoot = _rootFolderService != null && _calibre != null && localBook.Author?.Path.IsNotNullOrWhiteSpace() == true
+                            ? _rootFolderService.GetBestRootFolder(Path.GetDirectoryName(localBook.Author.Path.TrimEnd(Path.DirectorySeparatorChar)))
+                            : null;
+
+                        // Calibre manages ebooks only. Audiobooks in a mixed calibre root are plain
+                        // file transfers; pushing audio through the content server would corrupt the library.
+                        var importExtension = (Path.GetExtension(bookFile.Path) ?? string.Empty).ToLowerInvariant();
+                        var isAudioImport = MediaFileExtensions.AudioExtensions.Contains(importExtension);
+
+                        if (!isAudioImport && calibreRoot?.IsCalibreLibrary == true && calibreRoot.CalibreSettings != null)
+                        {
+                            if (bookFile.CalibreId == 0 && bookFile.EditionId > 0)
+                            {
+                                var siblingCalibreId = 0;
+                                try
+                                {
+                                    siblingCalibreId = _mediaFileService.GetFilesByBook(localBook.Book.Id)
+                                        .Where(f => f.EditionId == bookFile.EditionId && f.CalibreId > 0)
+                                        .Select(f => f.CalibreId)
+                                        .FirstOrDefault();
+                                }
+                                catch
+                                {
+                                }
+
+                                if (siblingCalibreId == 0 &&
+                                    _recentCalibreIdsByEditionId.TryGetValue(bookFile.EditionId, out var recentCalibreId) &&
+                                    recentCalibreId.Added > DateTime.UtcNow.AddMinutes(-10))
+                                {
+                                    siblingCalibreId = recentCalibreId.CalibreId;
+                                }
+
+                                if (siblingCalibreId > 0)
+                                {
+                                    _logger.Debug("[CLEAN-IMPORT] Adding {0} as another format of calibre book {1} (edition {2})", bookFile.Path, siblingCalibreId, bookFile.EditionId);
+                                    bookFile.CalibreId = siblingCalibreId;
+                                }
+                            }
+
+                            var calibreSource = bookFile.Path;
+                            bookFile = _calibre.AddAndConvert(bookFile, calibreRoot.CalibreSettings);
+
+                            if (bookFile.CalibreId > 0 && bookFile.EditionId > 0)
+                            {
+                                _recentCalibreIdsByEditionId[bookFile.EditionId] = (bookFile.CalibreId, DateTime.UtcNow);
+                            }
+
+                            PushCalibreIdentity(bookFile, localBook, calibreRoot.CalibreSettings);
+
+                            if (!copyOnly && calibreSource != bookFile.Path)
+                            {
+                                File.Delete(calibreSource);
+                            }
+                        }
+                        else if (copyOnly)
                         {
                             bookFile = _bookFileMover.CopyBookFile(bookFile, localBook);
                         }
@@ -1478,6 +1554,65 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 _logger.Error(ex, "[CLEAN-IMPORT] Failed to import file: {0}", localBook.Path);
                 return (new ImportResult(decision, "Import failed: " + ex.Message), null);
             }
+        }
+
+        private void PushCalibreIdentity(BookFile bookFile, LocalBook localBook, CalibreSettings settings)
+        {
+            if (bookFile.CalibreId == 0 || _calibre == null)
+            {
+                return;
+            }
+
+            var title = localBook?.Edition?.Title;
+
+            if (title.IsNullOrWhiteSpace())
+            {
+                title = localBook?.Book?.Title;
+            }
+
+            var seriesLink = CalibreSeriesSelector.Select(localBook?.Book);
+            double? seriesIndex = null;
+
+            if (double.TryParse(seriesLink?.Position, out var parsedIndex))
+            {
+                seriesIndex = parsedIndex;
+            }
+
+            try
+            {
+                _calibre.SetIdentity(bookFile.CalibreId, title, localBook?.Author?.Name, seriesLink?.Series?.Value?.Title, seriesIndex, settings);
+                FollowCalibreRefile(bookFile, settings);
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "Unable to push metadata to calibre for {0}", bookFile.Path);
+            }
+        }
+
+        /// <summary>
+        /// Writing a title or author moves the book, because calibre derives its folder from them.
+        /// The row is saved after this runs, so point it at where the file actually landed.
+        /// </summary>
+        private void FollowCalibreRefile(BookFile bookFile, CalibreSettings settings)
+        {
+            var extension = Path.GetExtension(bookFile.Path).TrimStart('.');
+
+            if (extension.IsNullOrWhiteSpace())
+            {
+                return;
+            }
+
+            var moved = _calibre.GetBook(bookFile.CalibreId, settings)?.Formats?
+                .FirstOrDefault(f => f.Key.Equals(extension, StringComparison.OrdinalIgnoreCase))
+                .Value;
+
+            if (moved?.Path == null || moved.Path.PathEquals(bookFile.Path))
+            {
+                return;
+            }
+
+            _logger.Debug("Calibre refiled {0} to {1} after the identity push", bookFile.Path, moved.Path);
+            bookFile.Path = moved.Path;
         }
 
         private string GetCustomFormatImportRejectionReason(LocalBook localBook, Author author, QualityProfile qualityProfile, bool downloadForced)
@@ -3479,6 +3614,26 @@ namespace NzbDrone.Core.MediaFiles.BookImport
         {
             public Book NewBook { get; set; }
             public Edition NewEdition { get; set; }
+        }
+
+        private bool IsCalibreLibraryAuthor(Author author)
+        {
+            try
+            {
+                var path = author?.Path;
+
+                if (path.IsNullOrWhiteSpace() || _rootFolderService == null)
+                {
+                    return false;
+                }
+
+                var rootFolder = _rootFolderService.GetBestRootFolder(path);
+                return rootFolder != null && rootFolder.IsCalibreLibrary;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private BatchBookResult CreateNewBookInstanceForBatch(ImportDecision<LocalBook> decision, Book originalBook, Author author, bool anyEditionOk)
