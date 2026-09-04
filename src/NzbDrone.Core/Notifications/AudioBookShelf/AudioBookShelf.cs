@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
 using FluentValidation;
 using FluentValidation.Results;
 using NLog;
@@ -30,6 +31,8 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
         private readonly ICached<AudioBookShelfOidcPendingAuth> _oidcPendingAuthCache;
         private readonly ICached<List<AudioBookShelfLibrary>> _libraryCache;
         private readonly IRootFolderService _rootFolderService;
+        private readonly IBookService _bookService;
+        private readonly IEditionService _editionService;
         private readonly Logger _logger;
 
         private static readonly TimeSpan LibraryCacheDuration = TimeSpan.FromMinutes(1);
@@ -39,6 +42,8 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                               IPendingProviderSecretService pendingProviderSecretService,
                               ICacheManager cacheManager,
                               IRootFolderService rootFolderService,
+                              IBookService bookService,
+                              IEditionService editionService,
                               Logger logger)
         {
             _proxy = proxy;
@@ -47,6 +52,8 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             _oidcPendingAuthCache = cacheManager.GetCache<AudioBookShelfOidcPendingAuth>(GetType());
             _libraryCache = cacheManager.GetCache<List<AudioBookShelfLibrary>>(GetType(), "libraries");
             _rootFolderService = rootFolderService;
+            _bookService = bookService;
+            _editionService = editionService;
             _logger = logger;
         }
 
@@ -113,6 +120,11 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             }
 
             SendLibraryScans(libraryScans);
+
+            // A rename retires the old folder identity; sweep whatever the move left
+            // flagged so canonicalization renames do not strand ghost items.
+            SchedulePurgeForDelete(libraryScans);
+            ScheduleItemRescans(renamedFiles);
         }
 
         public override void OnBookFileDelete(BookFileDeleteMessage deleteMessage)
@@ -140,6 +152,46 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             }
 
             SendLibraryScans(libraryScans);
+            SchedulePurgeForDelete(libraryScans);
+        }
+
+        public override void OnBookDelete(BookDeleteMessage deleteMessage)
+        {
+            var author = deleteMessage.Book?.Author;
+            var mediaType = deleteMessage.Book?.MediaType == BookMediaType.Audiobook ? "audiobook" : "ebook";
+
+            var libraryScans = NewLibraryScanSet();
+
+            if (Settings.HasConfiguredLibraryMappings())
+            {
+                SendMappedDelete(author, null, mediaType, libraryScans);
+            }
+            else
+            {
+                AddLegacyLibraryScans(author, null, mediaType, libraryScans);
+            }
+
+            SendLibraryScans(libraryScans);
+            SchedulePurgeForDelete(libraryScans);
+        }
+
+        public override void OnAuthorDelete(AuthorDeleteMessage deleteMessage)
+        {
+            var author = deleteMessage.Author;
+            var libraryScans = NewLibraryScanSet();
+
+            if (Settings.HasConfiguredLibraryMappings())
+            {
+                SendMappedDelete(author, null, "audiobook", libraryScans);
+                SendMappedDelete(author, null, "ebook", libraryScans);
+            }
+            else
+            {
+                AddLegacyLibraryScans(author, null, null, libraryScans);
+            }
+
+            SendLibraryScans(libraryScans);
+            SchedulePurgeForDelete(libraryScans);
         }
 
         // Watcher updates and scan fallbacks are sent at event time (fire and forget). Notification
@@ -220,6 +272,333 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 _logger.Debug(ex, "Failed to send AudioBookShelf watcher update for library '{0}', falling back to full scan", target.LibraryId);
                 libraryScans.Add(target.LibraryId);
             }
+        }
+
+        private AudioBookShelfItemMetadata BuildItemMetadata(Book book)
+        {
+            return new AudioBookShelfItemMetadata
+            {
+                Title = book.Title,
+                Description = book.Overview,
+                Publisher = book.Publisher,
+                SeriesName = book.SeriesName,
+                SeriesPosition = book.SeriesPosition,
+                Genres = book.Genres ?? new List<string>()
+            };
+        }
+
+        public void PushBookMetadata(Book book, List<BookFile> files)
+        {
+            // Changing a book's metadata never renames its files, so no rename ever
+            // reaches AudioBookShelf and the item keeps whatever it was first scanned
+            // with. Send the current values straight to the item.
+            if (book == null || files == null || files.Count == 0)
+            {
+                return;
+            }
+
+            var mappings = Settings.GetLibraryMappings();
+
+            if (mappings.Count == 0)
+            {
+                return;
+            }
+
+            var folders = files
+                .Select(f => f?.Path)
+                .Where(path => path.IsNotNullOrWhiteSpace())
+                .Select(Path.GetDirectoryName)
+                .Where(folder => folder.IsNotNullOrWhiteSpace())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (!folders.Any())
+            {
+                return;
+            }
+
+            var payload = BuildItemMetadata(book);
+
+            foreach (var libraryId in mappings.Select(m => m?.LibraryId).Where(id => !string.IsNullOrEmpty(id)).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                List<AudioBookShelfLibraryItemSummary> items;
+
+                try
+                {
+                    items = _proxy.GetLibraryItems(Settings, libraryId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug(ex, "AudioBookShelf: unable to list items for library '{0}'", libraryId);
+                    continue;
+                }
+
+                foreach (var folder in folders)
+                {
+                    RootFolder rootFolder;
+
+                    try
+                    {
+                        rootFolder = _rootFolderService.GetBestRootFolder(folder);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    if (rootFolder?.Path == null)
+                    {
+                        continue;
+                    }
+
+                    var rel = folder.Substring(rootFolder.Path.TrimEnd('/').Length).TrimStart('/');
+                    var item = items.FirstOrDefault(i => string.Equals(i.RelPath, rel, StringComparison.OrdinalIgnoreCase));
+
+                    if (item == null)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        _proxy.UpdateItemMetadata(Settings, item.Id, payload);
+                        _logger.Debug("AudioBookShelf: pushed metadata for '{0}' ({1} genre(s))", rel, payload.Genres?.Count ?? 0);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Debug(ex, "AudioBookShelf: metadata push failed for '{0}'", rel);
+                    }
+
+                    PushItemCover(mappings, libraryId, item.Id, folder, rel);
+                }
+            }
+        }
+
+        private void PushItemCover(List<AudioBookShelfLibraryMapping> mappings, string libraryId, string itemId, string folder, string rel)
+        {
+            var localCover = Path.Combine(folder, "cover.jpg");
+
+            if (!File.Exists(localCover))
+            {
+                return;
+            }
+
+            var mapping = mappings.FirstOrDefault(m =>
+                string.Equals(m?.LibraryId, libraryId, StringComparison.OrdinalIgnoreCase) &&
+                m.LibraryFolderPath.IsNotNullOrWhiteSpace());
+
+            if (mapping == null)
+            {
+                return;
+            }
+
+            var remoteCover = mapping.LibraryFolderPath.TrimEnd('/') + "/" + rel + "/cover.jpg";
+
+            try
+            {
+                _proxy.UpdateItemCover(Settings, itemId, remoteCover);
+                _logger.Debug("AudioBookShelf: set item cover from '{0}'", remoteCover);
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "AudioBookShelf: cover update failed for '{0}'", rel);
+            }
+        }
+
+        private void ScheduleItemRescans(List<RenamedBookFile> renamedFiles)
+        {
+            // A tracked move keeps the item's old metadata; ask AudioBookShelf to
+            // rescan the affected items so it re-reads the canonical OPF.
+            if (renamedFiles == null || renamedFiles.Count == 0)
+            {
+                return;
+            }
+
+            var folderBooks = new Dictionary<string, Book>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var renamed in renamedFiles)
+            {
+                var path = renamed?.BookFile?.Path;
+
+                if (path.IsNullOrWhiteSpace())
+                {
+                    continue;
+                }
+
+                var folder = Path.GetDirectoryName(path);
+
+                if (folder.IsNullOrWhiteSpace() || folderBooks.ContainsKey(folder))
+                {
+                    continue;
+                }
+
+                Book book = null;
+
+                try
+                {
+                    var editionId = renamed.BookFile.EditionId;
+                    var edition = editionId > 0 ? _editionService.GetEdition(editionId) : null;
+
+                    if (edition != null && edition.BookId > 0)
+                    {
+                        book = _bookService.GetBook(edition.BookId);
+                    }
+                }
+                catch
+                {
+                }
+
+                folderBooks[folder] = book;
+            }
+
+            var newFolders = folderBooks.Keys.ToList();
+
+            var mappings = Settings.GetLibraryMappings();
+
+            if (!newFolders.Any() || mappings.Count == 0)
+            {
+                return;
+            }
+
+            var settings = Settings;
+            var proxy = _proxy;
+            var logger = _logger;
+            var rootFolderService = _rootFolderService;
+
+            Task.Delay(TimeSpan.FromSeconds(45)).ContinueWith(_ =>
+            {
+                try
+                {
+                    foreach (var libraryId in mappings.Select(m => m?.LibraryId).Where(id => !string.IsNullOrEmpty(id)).Distinct(StringComparer.OrdinalIgnoreCase))
+                    {
+                        var items = proxy.GetLibraryItems(settings, libraryId);
+
+                        foreach (var folder in newFolders)
+                        {
+                            RootFolder rootFolder;
+
+                            try
+                            {
+                                rootFolder = rootFolderService.GetBestRootFolder(folder);
+                            }
+                            catch
+                            {
+                                continue;
+                            }
+
+                            if (rootFolder?.Path == null)
+                            {
+                                continue;
+                            }
+
+                            var rel = folder.Substring(rootFolder.Path.TrimEnd('/').Length).TrimStart('/');
+                            var item = items.FirstOrDefault(i => string.Equals(i.RelPath, rel, StringComparison.OrdinalIgnoreCase));
+
+                            if (item == null)
+                            {
+                                continue;
+                            }
+
+                            // Ask AudioBookShelf to re-read the folder FIRST. A scan
+                            // overwrites item metadata from the files, so pushing before
+                            // it means the canonical values are immediately discarded and
+                            // the item visibly flips back to whatever the file carries.
+                            proxy.ScanItem(settings, item.Id);
+                            logger.Debug("AudioBookShelf: requested item rescan for '{0}'", rel);
+
+                            var bookForItem = folderBooks.TryGetValue(folder, out var b) ? b : null;
+
+                            if (bookForItem != null)
+                            {
+                                proxy.UpdateItemMetadata(settings, item.Id, BuildItemMetadata(bookForItem));
+                                logger.Debug("AudioBookShelf: set item metadata for '{0}'", rel);
+                            }
+
+                            var localCover = Path.Combine(folder, "cover.jpg");
+
+                            if (File.Exists(localCover))
+                            {
+                                var mapping = mappings.FirstOrDefault(m =>
+                                    string.Equals(m?.LibraryId, libraryId, StringComparison.OrdinalIgnoreCase) &&
+                                    m.LibraryFolderPath.IsNotNullOrWhiteSpace());
+
+                                if (mapping != null)
+                                {
+                                    var remoteCover = mapping.LibraryFolderPath.TrimEnd('/') + "/" + rel + "/cover.jpg";
+
+                                    try
+                                    {
+                                        proxy.UpdateItemCover(settings, item.Id, remoteCover);
+                                        logger.Debug("AudioBookShelf: set item cover from '{0}'", remoteCover);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        logger.Debug(ex, "AudioBookShelf: cover update failed for '{0}'", rel);
+                                    }
+                                }
+                            }
+
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.Debug(ex, "AudioBookShelf: item rescan after rename failed");
+                }
+            });
+        }
+
+        private void SchedulePurgeForDelete(ISet<string> libraryScans)
+        {
+            // Mapped deletes are handled with watcher updates and never enter the scan
+            // loop, so purge scheduling must not live there: sweep every library this
+            // connection covers, whichever notification path ran.
+            if (!Settings.RemoveMissingItems)
+            {
+                return;
+            }
+
+            var libraryIds = new HashSet<string>(libraryScans ?? new HashSet<string>(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var mapping in Settings.GetLibraryMappings())
+            {
+                if (mapping?.LibraryId.IsNotNullOrWhiteSpace() == true)
+                {
+                    libraryIds.Add(mapping.LibraryId);
+                }
+            }
+
+            if (Settings.LibraryId.IsNotNullOrWhiteSpace())
+            {
+                libraryIds.Add(Settings.LibraryId);
+            }
+
+            foreach (var libraryId in libraryIds)
+            {
+                SchedulePurgeMissing(libraryId);
+            }
+        }
+
+        private void SchedulePurgeMissing(string libraryId)
+        {
+            var settings = Settings;
+            var proxy = _proxy;
+            var logger = _logger;
+
+            // The scan triggered alongside this purge flags freshly deleted files as
+            // missing asynchronously; wait it out before sweeping, or the sweep runs
+            // before anything is flagged and the ghost item survives.
+            Task.Delay(TimeSpan.FromSeconds(30)).ContinueWith(_ =>
+            {
+                try
+                {
+                    proxy.RemoveItemsWithIssues(settings, libraryId);
+                }
+                catch (Exception ex)
+                {
+                    logger.Debug(ex, "Failed to remove missing items for library: {0}", libraryId);
+                }
+            });
         }
 
         private void SendLibraryScans(ISet<string> libraryIds)
