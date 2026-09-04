@@ -7,6 +7,7 @@ using NzbDrone.Core.Books;
 using NzbDrone.Core.MediaCover;
 using NzbDrone.Core.MediaFiles;
 using NzbDrone.Core.Messaging.Events;
+using NzbDrone.Core.ThingiProvider;
 
 namespace NzbDrone.Core.Notifications.AudioBookShelf
 {
@@ -15,16 +16,19 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
         private readonly IBookService _bookService;
         private readonly IMediaFileService _mediaFileService;
         private readonly INotificationFactory _notificationFactory;
+        private readonly INotificationStatusService _notificationStatusService;
         private readonly Logger _logger;
 
         public AudioBookShelfLibraryEditService(IBookService bookService,
                                                 IMediaFileService mediaFileService,
                                                 INotificationFactory notificationFactory,
+                                                INotificationStatusService notificationStatusService,
                                                 Logger logger)
         {
             _bookService = bookService;
             _mediaFileService = mediaFileService;
             _notificationFactory = notificationFactory;
+            _notificationStatusService = notificationStatusService;
             _logger = logger;
         }
 
@@ -33,9 +37,20 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             // AudioBookShelf keeps its own copy of an item's metadata and only re-reads
             // it on a rename, so a change Chaptarr makes to a book would otherwise never
             // show up there.
+            Author author = message.Author;
+
+            if (author == null && message.Book != null)
+            {
+                author = message.Book.Author;
+            }
+
+            var blockedProviders = new HashSet<int>(_notificationStatusService.GetBlockedProviders().Select(v => v.ProviderId));
+
             var shelves = _notificationFactory.GetAvailableProviders()
                 .OfType<AudioBookShelf>()
                 .Where(s => ((AudioBookShelfSettings)s.Definition.Settings).PushLibraryEdits)
+                .Where(s => !blockedProviders.Contains(s.Definition.Id))
+                .Where(s => ShouldHandleAuthor(s.Definition, author))
                 .ToList();
 
             if (!shelves.Any())
@@ -43,29 +58,41 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 return;
             }
 
-            foreach (var book in GetBooks(message))
-            {
-                var files = _mediaFileService.GetFilesByBook(book.Id)
+            var books = GetBooks(message)
+                .Select(book => (Book: book, Files: _mediaFileService.GetFilesByBook(book.Id)
                     .Where(f => f.Path.IsNotNullOrWhiteSpace())
-                    .ToList();
+                    .ToList()))
+                .Where(x => x.Files.Any())
+                .ToList();
 
-                if (!files.Any())
+            if (!books.Any())
+            {
+                return;
+            }
+
+            foreach (var shelf in shelves)
+            {
+                try
                 {
-                    continue;
+                    shelf.PushBooksMetadata(books);
+                    _notificationStatusService.RecordSuccess(shelf.Definition.Id);
                 }
-
-                foreach (var shelf in shelves)
+                catch (Exception ex)
                 {
-                    try
-                    {
-                        shelf.PushBookMetadata(book, files);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.Debug(ex, "Unable to push metadata for {0} to AudioBookShelf", book.Title);
-                    }
+                    _notificationStatusService.RecordFailure(shelf.Definition.Id);
+                    _logger.Warn(ex, "Unable to push metadata to AudioBookShelf: " + shelf.Definition.Name);
                 }
             }
+        }
+
+        private static bool ShouldHandleAuthor(ProviderDefinition definition, Author author)
+        {
+            if (definition.Tags.Empty() || author == null)
+            {
+                return true;
+            }
+
+            return definition.Tags.Intersect(author.Tags).Any();
         }
 
         private IEnumerable<Book> GetBooks(MediaCoversUpdatedEvent message)
