@@ -120,7 +120,7 @@ class BookEditorFooter extends Component {
       isSaving,
       isDeleting,
       isPushingToCalibre,
-      showPushToCalibre
+      showPushToCalibre,
       isResendingToCalibre,
       showResendToCalibre
     } = this.props;

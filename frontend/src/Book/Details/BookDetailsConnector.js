@@ -88,9 +88,8 @@ function createMapStateToProps() {
     createUISettingsSelector(),
     createDimensionsSelector(),
     (state) => state.settings.rootFolders.items,
-    (bookId, bookFiles, books, editions, authors, commands, uiSettings, dimensions, rootFolders) => {
     (state) => state.settings.notifications.items,
-    (bookId, bookFiles, books, editions, authors, commands, uiSettings, dimensions, notifications) => {
+    (bookId, bookFiles, books, editions, authors, commands, uiSettings, dimensions, rootFolders, notifications) => {
       try {
         const book = books.items.find((b) => b.id === bookId);
 
@@ -151,6 +150,7 @@ function createMapStateToProps() {
         isCommandExecuting(pushCommand) &&
         pushCommand.body &&
         (pushCommand.body.bookIds || []).includes(book.id)
+        );
         const rePushCommand = findCommand(commands, { name: commandNames.REPUSH_BOOK });
         const isRePushing = !!(
           rePushCommand &&
