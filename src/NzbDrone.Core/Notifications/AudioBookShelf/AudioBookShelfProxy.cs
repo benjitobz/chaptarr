@@ -13,9 +13,30 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
     {
         void ScanLibrary(AudioBookShelfSettings settings);
         void ScanLibrary(AudioBookShelfSettings settings, string libraryId);
+        void RemoveItemsWithIssues(AudioBookShelfSettings settings, string libraryId);
+        List<AudioBookShelfLibraryItemSummary> GetLibraryItems(AudioBookShelfSettings settings, string libraryId);
+        void ScanItem(AudioBookShelfSettings settings, string itemId);
+        void UpdateItemMetadata(AudioBookShelfSettings settings, string itemId, AudioBookShelfItemMetadata metadata);
+        void UpdateItemCover(AudioBookShelfSettings settings, string itemId, string coverPath);
         void UpdateWatchedPath(AudioBookShelfSettings settings, string libraryId, string path, string type, string oldPath = null);
         ValidationFailure Test(AudioBookShelfSettings settings);
         List<AudioBookShelfLibrary> GetLibraries(AudioBookShelfSettings settings);
+    }
+
+    public class AudioBookShelfItemMetadata
+    {
+        public string Title { get; set; }
+        public string Description { get; set; }
+        public string Publisher { get; set; }
+        public string SeriesName { get; set; }
+        public string SeriesPosition { get; set; }
+        public List<string> Genres { get; set; }
+    }
+
+    public class AudioBookShelfLibraryItemSummary
+    {
+        public string Id { get; set; }
+        public string RelPath { get; set; }
     }
 
     public class AudioBookShelfProxy : IAudioBookShelfProxy
@@ -72,6 +93,26 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
             var request = BuildRequest(settings, $"/api/libraries/{libraryId}/scan");
             request.Method = HttpMethod.Post;
+
+            var response = _httpClient.Execute(request);
+
+            if (response.HasHttpError)
+            {
+                throw new HttpException(response);
+            }
+        }
+
+        public void RemoveItemsWithIssues(AudioBookShelfSettings settings, string libraryId)
+        {
+            if (string.IsNullOrEmpty(libraryId))
+            {
+                return;
+            }
+
+            // AudioBookShelf marks deleted books as missing instead of removing them;
+            // DELETE /api/libraries/:id/issues purges items whose files are gone.
+            var request = BuildRequest(settings, $"/api/libraries/{libraryId}/issues");
+            request.Method = HttpMethod.Delete;
 
             var response = _httpClient.Execute(request);
 
@@ -170,6 +211,124 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
             var librariesResponse = Json.Deserialize<AudioBookShelfLibrariesResponse>(response.Content);
             return librariesResponse?.Libraries ?? new List<AudioBookShelfLibrary>();
+        }
+
+        public List<AudioBookShelfLibraryItemSummary> GetLibraryItems(AudioBookShelfSettings settings, string libraryId)
+        {
+            var request = BuildRequest(settings, $"/api/libraries/{libraryId}/items?limit=0&minified=1");
+            var response = _httpClient.Execute(request);
+
+            if (response.HasHttpError)
+            {
+                throw new HttpException(response);
+            }
+
+            var parsed = Json.Deserialize<AudioBookShelfLibraryItemsResponse>(response.Content);
+            return parsed?.Results ?? new List<AudioBookShelfLibraryItemSummary>();
+        }
+
+        public void ScanItem(AudioBookShelfSettings settings, string itemId)
+        {
+            if (string.IsNullOrEmpty(itemId))
+            {
+                return;
+            }
+
+            var request = BuildRequest(settings, $"/api/items/{itemId}/scan");
+            request.Method = HttpMethod.Post;
+
+            var response = _httpClient.Execute(request);
+
+            if (response.HasHttpError)
+            {
+                throw new HttpException(response);
+            }
+        }
+
+        public void UpdateItemMetadata(AudioBookShelfSettings settings, string itemId, AudioBookShelfItemMetadata item)
+        {
+            if (string.IsNullOrEmpty(itemId) || item == null)
+            {
+                return;
+            }
+
+            var metadata = new Dictionary<string, object>();
+
+            if (item.Title.IsNotNullOrWhiteSpace())
+            {
+                metadata["title"] = item.Title;
+            }
+
+            if (item.Description.IsNotNullOrWhiteSpace())
+            {
+                metadata["description"] = item.Description;
+            }
+
+            if (item.Publisher.IsNotNullOrWhiteSpace())
+            {
+                metadata["publisher"] = item.Publisher;
+            }
+
+            if (item.SeriesName.IsNotNullOrWhiteSpace())
+            {
+                metadata["series"] = new[]
+                {
+                    new { name = item.SeriesName, sequence = item.SeriesPosition ?? string.Empty }
+                };
+            }
+
+            // Genres are replaced wholesale: a tag removed in the owning library has
+            // to disappear here too, so an empty list is still worth sending.
+            if (item.Genres != null)
+            {
+                metadata["genres"] = item.Genres;
+            }
+
+            if (metadata.Count == 0)
+            {
+                return;
+            }
+
+            // A rescan deliberately keeps existing metadata, so push the canonical
+            // values into the item instead of hoping a re-read wins.
+            var request = BuildRequest(settings, $"/api/items/{itemId}/media");
+            request.Method = HttpMethod.Patch;
+            request.Headers.ContentType = "application/json";
+            request.SetContent(Json.ToJson(new { metadata }));
+
+            var response = _httpClient.Execute(request);
+
+            if (response.HasHttpError)
+            {
+                throw new HttpException(response);
+            }
+        }
+
+        public void UpdateItemCover(AudioBookShelfSettings settings, string itemId, string coverPath)
+        {
+            if (string.IsNullOrEmpty(itemId) || string.IsNullOrEmpty(coverPath))
+            {
+                return;
+            }
+
+            // AudioBookShelf keeps a private copy of an item's cover and never replaces
+            // it from folder changes; point it at the canonical cover explicitly.
+            var request = BuildRequest(settings, $"/api/items/{itemId}/cover");
+            request.Method = HttpMethod.Patch;
+            request.Headers.ContentType = "application/json";
+            request.SetContent(Json.ToJson(new { cover = coverPath }));
+
+            var response = _httpClient.Execute(request);
+
+            if (response.HasHttpError)
+            {
+                throw new HttpException(response);
+            }
+        }
+
+        private class AudioBookShelfLibraryItemsResponse
+        {
+            public List<AudioBookShelfLibraryItemSummary> Results { get; set; }
         }
 
         private HttpRequest BuildRequest(AudioBookShelfSettings settings, string resource)
