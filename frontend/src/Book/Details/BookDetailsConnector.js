@@ -182,7 +182,7 @@ function createMapStateToProps() {
           shortDateFormat: uiSettings.shortDateFormat,
           author,
           calibrePreview: buildCalibrePreview(book, author, selectedEdition),
-          showPushToCalibre: rootFolders.some((f) => f.isCalibreLibrary && isUnderPath(author.path || '', f.path)),
+          showPushToCalibre: rootFolders.some((f) => f.isCalibreLibrary && (author.path || '').startsWith(f.path)),
           isPushingToCalibre,
           isRefreshing,
           isSearching,
