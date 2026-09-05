@@ -1000,6 +1000,11 @@ namespace NzbDrone.Core.MediaCover
 
                 foreach (var candidate in candidates)
                 {
+                    if (_mediaCoverProxy.TryResolveProxyUrl(candidate.Cover.Url, out var restoredUrl))
+                    {
+                        candidate.Cover.Url = restoredUrl;
+                    }
+
                     if (!TryGetSafeImageUrl(candidate.Cover.Url, out _, out var unsafeReason))
                     {
                         _logger.Debug("Skipping unsafe monitored-edition cover URL for book {0}: {1} ({2})", book.Title, candidate.Cover.Url, unsafeReason);
@@ -1042,6 +1047,26 @@ namespace NzbDrone.Core.MediaCover
             }
         }
 
+        // Every edition of a book shares one cover file name, so a url that was mapped to that
+        // file no longer describes what the file holds once a different edition is written over
+        // it. Drop those mappings before overwriting, otherwise a later switch back reuses the
+        // wrong image and then stamps the sidecar as if it were right.
+        private void ForgetCachedCoverPath(string fileName)
+        {
+            if (fileName.IsNullOrWhiteSpace())
+            {
+                return;
+            }
+
+            foreach (var stale in _bookCoverUrlToPath
+                         .Where(pair => pair.Value.PathEquals(fileName))
+                         .Select(pair => pair.Key)
+                         .ToList())
+            {
+                _bookCoverUrlToPath.TryRemove(stale, out _);
+            }
+        }
+
         private bool EnsureMonitoredBookCover(Book book, BookCoverSelection selection)
         {
             var cover = selection.Cover;
@@ -1062,9 +1087,12 @@ namespace NzbDrone.Core.MediaCover
             var downloadedOrReused = false;
             if (!selectedUrlAlreadyStored || !hasOriginal)
             {
+                ForgetCachedCoverPath(fileName);
+
                 var urlHash = ComputeHash(cover.Url);
                 if (!string.IsNullOrWhiteSpace(urlHash) &&
                     _bookCoverUrlToPath.TryGetValue(urlHash, out var cachedPath) &&
+                    !cachedPath.PathEquals(fileName) &&
                     MediaCoverRendition.IsUsable(cachedPath, _diskProvider))
                 {
                     ReplaceFileWithCopy(cachedPath, fileName);
