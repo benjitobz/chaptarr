@@ -135,7 +135,10 @@ class BookDetails extends Component {
       isPushingToCalibre,
       showPushToCalibre,
       onPushToCalibrePress,
+      isRePushing,
+      showRePush,
       onRefreshPress,
+      onRePushPress,
       onSearchPress,
       statistics = {}
     } = this.props;
@@ -200,6 +203,22 @@ class BookDetails extends Component {
                     isDisabled={!hasBookFiles}
                     isSpinning={isPushingToCalibre}
                     onPress={this.onCalibrePushPress}
+                  />
+
+                  <PageToolbarSeparator />
+                </Fragment> :
+                null
+            }
+
+            {
+              showRePush ?
+                <Fragment>
+                  <PageToolbarButton
+                    label={translate('ResendToCalibre')}
+                    title={translate('ResendToCalibreContentServerConnections')}
+                    iconName={icons.EXPORT}
+                    isSpinning={isRePushing}
+                    onPress={onRePushPress}
                   />
 
                   <PageToolbarSeparator />
@@ -447,6 +466,8 @@ BookDetails.propTypes = {
   isPushingToCalibre: PropTypes.bool,
   showPushToCalibre: PropTypes.bool,
   onPushToCalibrePress: PropTypes.func,
+  isRePushing: PropTypes.bool,
+  showRePush: PropTypes.bool,
   isFetching: PropTypes.bool,
   isPopulated: PropTypes.bool,
   bookFilesError: PropTypes.object,
@@ -460,6 +481,7 @@ BookDetails.propTypes = {
   isSmallScreen: PropTypes.bool.isRequired,
   onMonitorTogglePress: PropTypes.func.isRequired,
   onRefreshPress: PropTypes.func,
+  onRePushPress: PropTypes.func,
   onSearchPress: PropTypes.func.isRequired
 };
 
