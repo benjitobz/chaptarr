@@ -147,6 +147,16 @@ class BookDetails extends Component {
       bookFileCount = 0
     } = statistics;
 
+    if (!id || !author) {
+      return (
+        <PageContent title={title}>
+          <PageContentBody>
+            <LoadingIndicator />
+          </PageContentBody>
+        </PageContent>
+      );
+    }
+
     const {
       isOrganizeModalOpen,
       isRetagModalOpen,
