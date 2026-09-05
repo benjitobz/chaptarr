@@ -3,7 +3,7 @@ using NzbDrone.Core.Datastore.Migration.Framework;
 
 namespace NzbDrone.Core.Datastore.Migration
 {
-    [Migration(104)]
+    [Migration(108)]
     public class add_root_folder_calibre_gates : NzbDroneMigrationBase
     {
         protected override void MainDbUpgrade()
