@@ -25,6 +25,7 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
         // OnReleaseImport on another handler thread; instances are transient, so the
         // claim set is static and keyed per definition.
         private static readonly ConcurrentDictionary<string, DateTime> RecentlyPushedPaths = new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        private static readonly ConcurrentDictionary<string, (int MirrorId, DateTime Added)> RecentlyAddedMirrorIds = new ConcurrentDictionary<string, (int MirrorId, DateTime Added)>(StringComparer.OrdinalIgnoreCase);
         private static readonly TimeSpan RecentPushWindow = TimeSpan.FromMinutes(5);
 
         private readonly IHttpClient _httpClient;
@@ -118,6 +119,7 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
         {
             if (Settings.SyncChanges)
             {
+                RecentlyAddedMirrorIds.TryRemove(MirrorIdKey(message.Book), out _);
                 DeleteBook(message.Book);
             }
         }
@@ -303,6 +305,11 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 
             if (mirrorId == 0)
             {
+                mirrorId = RecentlyAddedMirrorId(book);
+            }
+
+            if (mirrorId == 0)
+            {
                 mirrorId = FindMirrorBookIds(book).Select(int.Parse).FirstOrDefault();
             }
 
@@ -316,10 +323,31 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 
             if (added > 0)
             {
+                // A freshly added record carries the file's embedded metadata until the
+                // canonical write lands, so a push in that window cannot find it by
+                // author and title and would add the book again.
+                RecentlyAddedMirrorIds[MirrorIdKey(book)] = (added, DateTime.UtcNow);
                 SetCanonicalMetadata(added, book);
             }
 
             return added;
+        }
+
+        private string MirrorIdKey(Book book)
+        {
+            return $"{Definition.Id}:{book?.Id ?? 0}";
+        }
+
+        private int RecentlyAddedMirrorId(Book book)
+        {
+            var now = DateTime.UtcNow;
+
+            foreach (var stale in RecentlyAddedMirrorIds.Where(p => now - p.Value.Added > RecentPushWindow).Select(p => p.Key).ToList())
+            {
+                RecentlyAddedMirrorIds.TryRemove(stale, out _);
+            }
+
+            return RecentlyAddedMirrorIds.TryGetValue(MirrorIdKey(book), out var entry) ? entry.MirrorId : 0;
         }
 
         private void SetCanonicalMetadata(int calibreId, Book book)
