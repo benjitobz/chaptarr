@@ -1,5 +1,5 @@
 import PropTypes from 'prop-types';
-import React, { Component, Fragment } from 'react';
+import React, { Component } from 'react';
 import { Tab, TabList, TabPanel, Tabs } from 'react-tabs';
 import AuthorHistoryTable from 'Author/History/AuthorHistoryTable';
 import DeleteBookModal from 'Book/Delete/DeleteBookModal';
@@ -205,34 +205,32 @@ class BookDetails extends Component {
 
             {
               showPushToCalibre ?
-                <Fragment>
-                  <PageToolbarButton
-                    label={translate('CalibrePush')}
-                    title={translate('PushMetadataToCalibre')}
-                    iconName={icons.TAGS}
-                    isDisabled={!hasBookFiles}
-                    isSpinning={isPushingToCalibre}
-                    onPress={this.onCalibrePushPress}
-                  />
-
-                  <PageToolbarSeparator />
-                </Fragment> :
+                <PageToolbarButton
+                  label={translate('CalibrePush')}
+                  title={translate('PushMetadataToCalibre')}
+                  iconName={icons.TAGS}
+                  isDisabled={!hasBookFiles}
+                  isSpinning={isPushingToCalibre}
+                  onPress={this.onCalibrePushPress}
+                /> :
                 null
             }
 
             {
               showRePush ?
-                <Fragment>
-                  <PageToolbarButton
-                    label={translate('ResendToCalibre')}
-                    title={translate('ResendToCalibreContentServerConnections')}
-                    iconName={icons.EXPORT}
-                    isSpinning={isRePushing}
-                    onPress={onRePushPress}
-                  />
+                <PageToolbarButton
+                  label={translate('ResendToCalibre')}
+                  title={translate('ResendToCalibreContentServerConnections')}
+                  iconName={icons.EXPORT}
+                  isSpinning={isRePushing}
+                  onPress={onRePushPress}
+                /> :
+                null
+            }
 
-                  <PageToolbarSeparator />
-                </Fragment> :
+            {
+              (showPushToCalibre || showRePush) ?
+                <PageToolbarSeparator /> :
                 null
             }
 
