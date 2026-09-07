@@ -29,6 +29,7 @@ namespace NzbDrone.Core.Books.Calibre
         private readonly IMediaFileService _mediaFileService;
         private readonly IRootFolderService _rootFolderService;
         private readonly ICalibreProxy _calibreProxy;
+        private readonly IMapCoversToLocal _mediaCoverService;
         private readonly IEventAggregator _eventAggregator;
         private readonly Logger _logger;
 
@@ -38,6 +39,7 @@ namespace NzbDrone.Core.Books.Calibre
                                           IMediaFileService mediaFileService,
                                           IRootFolderService rootFolderService,
                                           ICalibreProxy calibreProxy,
+                                          IMapCoversToLocal mediaCoverService,
                                           IEventAggregator eventAggregator,
                                           Logger logger)
         {
@@ -47,6 +49,7 @@ namespace NzbDrone.Core.Books.Calibre
             _mediaFileService = mediaFileService;
             _rootFolderService = rootFolderService;
             _calibreProxy = calibreProxy;
+            _mediaCoverService = mediaCoverService;
             _eventAggregator = eventAggregator;
             _logger = logger;
         }
@@ -184,6 +187,21 @@ namespace NzbDrone.Core.Books.Calibre
             if (author == null || author.Path.IsNullOrWhiteSpace())
             {
                 return null;
+            }
+
+            if (fields.Contains("cover", StringComparer.OrdinalIgnoreCase))
+            {
+                // The stored cover file can lag the monitored edition - imports pin the
+                // edition that fits the files after the cover was downloaded - and a push
+                // sends the file, not what the page renders. Reconcile before reading it.
+                try
+                {
+                    _mediaCoverService.EnsureBookCovers(book);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug(ex, "Unable to reconcile the cover for {0} before pushing", book.Title);
+                }
             }
 
             if (!TryGetCalibreSettings(author.Path, out var settings))
