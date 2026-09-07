@@ -149,6 +149,15 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 
         public bool RePush(Book book, List<NzbDrone.Core.MediaFiles.BookFile> files, bool metadataOnly = false)
         {
+            try
+            {
+                _coverMapper.EnsureBookCovers(book);
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "Unable to reconcile the cover for {0} before resending", book?.Title);
+            }
+
             var mirrorBookId = FindMirrorBookIds(book).Select(int.Parse).FirstOrDefault();
 
             if (metadataOnly && mirrorBookId > 0)
