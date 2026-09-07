@@ -36,7 +36,7 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
         [FieldDefinition(4, Label = "Push Library Scan Imports", Type = FieldType.Checkbox, HelpText = "Also push books that arrive via library scans, for example books added through calibre-web, to this content server")]
         public bool PushLibraryImports { get; set; }
 
-        [FieldDefinition(5, Label = "Push Library Edits", Type = FieldType.Checkbox, HelpText = "When Chaptarr changes a book - a calibre push, a retag, or an edit - push the updated record to this content server")]
+        [FieldDefinition(5, Label = "Push Library Edits", Type = FieldType.Checkbox, HelpText = "When a book changes - a calibre push, a retag, an edit, or an edit made in the calibre library that owns it - push the updated record to this content server")]
         public bool PushLibraryEdits { get; set; }
 
         public NzbDroneValidationResult Validate()

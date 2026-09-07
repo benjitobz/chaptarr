@@ -12,6 +12,10 @@ namespace NzbDrone.Core.Books.Calibre
 
         public string Title { get; set; }
 
+        [JsonProperty("last_modified")]
+        [JsonConverter(typeof(CalibreDateConverter))]
+        public DateTime? LastModified { get; set; }
+
         public List<string> Authors { get; set; }
 
         [JsonProperty("author_sort")]

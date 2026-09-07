@@ -359,6 +359,89 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
             return RecentlyAddedMirrorIds.TryGetValue(MirrorIdKey(book), out var entry) ? entry.MirrorId : 0;
         }
 
+        public void PushExternalMetadata(Book book, NzbDrone.Core.Books.Calibre.CalibreBook record, byte[] cover)
+        {
+            var mirrorId = RecentlyAddedMirrorId(book);
+
+            if (mirrorId == 0)
+            {
+                mirrorId = FindMirrorBookIds(book).Select(int.Parse).FirstOrDefault();
+            }
+
+            if (mirrorId == 0)
+            {
+                return;
+            }
+
+            // Identity stays Chaptarr's; everything else mirrors the owning library.
+            var changes = new Dictionary<string, object>();
+
+            if (record.Comments.IsNotNullOrWhiteSpace())
+            {
+                changes["comments"] = record.Comments;
+            }
+
+            if (record.Publisher.IsNotNullOrWhiteSpace())
+            {
+                changes["publisher"] = record.Publisher;
+            }
+
+            if (record.PubDate.HasValue)
+            {
+                changes["pubdate"] = record.PubDate;
+            }
+
+            if (record.Languages?.Any() == true)
+            {
+                changes["languages"] = record.Languages;
+            }
+
+            if (record.Tags?.Any() == true)
+            {
+                changes["tags"] = record.Tags;
+            }
+
+            if (record.Series.IsNotNullOrWhiteSpace())
+            {
+                changes["series"] = record.Series;
+
+                if (record.Position.HasValue)
+                {
+                    changes["series_index"] = record.Position.Value;
+                }
+            }
+
+            if (record.Identifiers?.Any() == true)
+            {
+                changes["identifiers"] = record.Identifiers;
+            }
+
+            if (cover != null && cover.Length > 0)
+            {
+                changes["cover"] = Convert.ToBase64String(cover);
+            }
+
+            if (!changes.Any())
+            {
+                return;
+            }
+
+            var payload = new Dictionary<string, object>
+            {
+                { "changes", changes },
+                { "loaded_book_ids", new List<int> { mirrorId } }
+            };
+
+            var request = BuildRequest($"cdb/set-fields/{mirrorId}")
+                .Post()
+                .SetHeader("Content-Type", "application/json")
+                .Build();
+            request.SetContent(payload.ToJson());
+            _httpClient.Execute(request);
+
+            _logger.Debug("Forwarded library metadata for '{0}' to content server book {1}", record.Title, mirrorId);
+        }
+
         private void SetCanonicalMetadata(int calibreId, Book book)
         {
             var title = book?.Title;

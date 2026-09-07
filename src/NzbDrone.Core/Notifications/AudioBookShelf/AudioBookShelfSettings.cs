@@ -71,7 +71,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
         [FieldDefinition(6, Label = "Remove Missing Items After Delete", Type = FieldType.Checkbox, HelpText = "AudioBookShelf marks deleted books as missing instead of removing them. When Chaptarr deletes books or files, also remove library items whose files are gone")]
         public bool RemoveMissingItems { get; set; }
 
-        [FieldDefinition(7, Label = "Push Library Edits", Type = FieldType.Checkbox, HelpText = "When Chaptarr changes a book - a calibre push, a retag, or an edit - send the current title, description, publisher, series and cover to the matching AudioBookShelf item. AudioBookShelf only re-reads an item when its files are renamed, so without this it keeps whatever it was first scanned with")]
+        [FieldDefinition(7, Label = "Push Library Edits", Type = FieldType.Checkbox, HelpText = "When a book changes - a calibre push, a retag, an edit, or an edit made in the calibre library that owns it - send the current title, description, publisher, series and cover to the matching AudioBookShelf item. AudioBookShelf only re-reads an item when its files are renamed, so without this it keeps whatever it was first scanned with")]
         public bool PushLibraryEdits { get; set; }
 
         [FieldDefinition(5, Type = FieldType.Textbox, Hidden = HiddenType.Hidden)]

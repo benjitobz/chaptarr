@@ -304,6 +304,71 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             };
         }
 
+        public void PushExternalBookMetadata(Book book, List<BookFile> files, AudioBookShelfItemMetadata payload, string coverUrl)
+        {
+            // Values forwarded from the library that owns the files, not read from
+            // Chaptarr's own records - see CalibreLibraryChangeForwarder.
+            if (book == null || files == null || files.Count == 0 || payload == null)
+            {
+                return;
+            }
+
+            var mappings = Settings.GetLibraryMappings();
+
+            if (mappings.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var libraryId in MappedLibraryIds(mappings))
+            {
+                List<AudioBookShelfLibraryItemSummary> items;
+
+                try
+                {
+                    items = _proxy.GetLibraryItems(Settings, libraryId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug(ex, "AudioBookShelf: unable to list items for library '{0}'", libraryId);
+                    continue;
+                }
+
+                foreach (var folder in DistinctFolders(files))
+                {
+                    var resolved = ResolveLibraryRelativePath(folder);
+
+                    if (resolved == null)
+                    {
+                        continue;
+                    }
+
+                    var item = items.FirstOrDefault(i => string.Equals(i.RelPath, resolved.Value.RelativePath, StringComparison.OrdinalIgnoreCase));
+
+                    if (item == null)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        _proxy.UpdateItemMetadata(Settings, item.Id, payload);
+
+                        if (coverUrl.IsNotNullOrWhiteSpace())
+                        {
+                            _proxy.UpdateItemCover(Settings, item.Id, coverUrl);
+                        }
+
+                        _logger.Debug("AudioBookShelf: forwarded library metadata for '{0}'", resolved.Value.RelativePath);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Debug(ex, "AudioBookShelf: forward failed for '{0}'", resolved.Value.RelativePath);
+                    }
+                }
+            }
+        }
+
         public void PushBooksMetadata(List<(Book Book, List<BookFile> Files)> books)
         {
             // Changing a book's metadata never renames its files, so no rename ever

@@ -36,6 +36,7 @@ namespace NzbDrone.Core.Books.Calibre
         Dictionary<int, string> GetBookTitlesUnderPath(string localPathPrefix, CalibreSettings settings);
         void DeleteBookIds(List<int> calibreIds, CalibreSettings settings);
         int GetCalibreIdForPath(string path, CalibreSettings settings);
+        byte[] GetCoverBytes(int calibreId, CalibreSettings settings);
         string GetFormatLocalPath(int calibreId, string extension, CalibreSettings settings);
         CalibreBook GetBook(int calibreId, CalibreSettings settings);
         List<CalibreBook> GetBooks(List<int> calibreId, CalibreSettings settings);
@@ -567,6 +568,22 @@ namespace NzbDrone.Core.Books.Calibre
             catch (HttpException ex)
             {
                 throw new CalibreException("Unable to start Calibre conversion: {0}", ex, ex.Message);
+            }
+        }
+
+        public byte[] GetCoverBytes(int calibreId, CalibreSettings settings)
+        {
+            try
+            {
+                var request = GetBuilder($"get/cover/{calibreId}/{settings.Library}", settings).Build();
+                var response = _httpClient.Get(request);
+
+                return response?.ResponseData?.Length > 0 ? response.ResponseData : null;
+            }
+            catch (HttpException ex)
+            {
+                _logger.Debug(ex, "Unable to fetch the cover for calibre record {0}", calibreId);
+                return null;
             }
         }
 
