@@ -19,12 +19,13 @@ namespace NzbDrone.Core.Books.Calibre
         [JsonProperty("pubdate")]
         public DateTime? PubDate { get; set; }
         public string Publisher { get; set; }
-        public string Languages { get; set; }
+        public List<string> Languages { get; set; }
         public List<string> Tags { get; set; }
         public string Comments { get; set; }
         public decimal Rating { get; set; }
         public Dictionary<string, string> Identifiers { get; set; }
-        [JsonProperty(NullValueHandling = NullValueHandling.Include)]
+        // Omitted when null: calibre-web's fetch may know the series when our own
+        // metadata does not, and an explicit null would erase it on every push.
         public string Series { get; set; }
         [JsonProperty("series_index")]
         public double? SeriesIndex { get; set; }
