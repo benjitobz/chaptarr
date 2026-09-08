@@ -34,9 +34,6 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
         public void Handle(MediaCoversUpdatedEvent message)
         {
-            // AudioBookShelf keeps its own copy of an item's metadata and only re-reads
-            // it on a rename, so a change Chaptarr makes to a book would otherwise never
-            // show up there.
             Author author = message.Author;
 
             if (author == null && message.Book != null)

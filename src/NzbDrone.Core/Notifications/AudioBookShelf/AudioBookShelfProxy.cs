@@ -109,8 +109,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 return;
             }
 
-            // AudioBookShelf marks deleted books as missing instead of removing them;
-            // DELETE /api/libraries/:id/issues purges items whose files are gone.
+            // ABS marks deleted books missing; this purges items whose files are gone.
             var request = BuildRequest(settings, $"/api/libraries/{libraryId}/issues");
             request.Method = HttpMethod.Delete;
 
@@ -277,8 +276,6 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 };
             }
 
-            // Genres are replaced wholesale: a tag removed in the owning library has
-            // to disappear here too, so an empty list is still worth sending.
             if (item.Genres != null)
             {
                 metadata["genres"] = item.Genres;
@@ -289,8 +286,6 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 return;
             }
 
-            // A rescan deliberately keeps existing metadata, so push the canonical
-            // values into the item instead of hoping a re-read wins.
             var request = BuildRequest(settings, $"/api/items/{itemId}/media");
             request.Method = HttpMethod.Patch;
             request.Headers.ContentType = "application/json";
@@ -311,8 +306,6 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 return;
             }
 
-            // AudioBookShelf keeps a private copy of an item's cover and never replaces
-            // it from folder changes; point it at the canonical cover explicitly.
             var request = BuildRequest(settings, $"/api/items/{itemId}/cover");
             request.Method = HttpMethod.Patch;
             request.Headers.ContentType = "application/json";

@@ -40,8 +40,6 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
         private static readonly TimeSpan PurgeDelay = TimeSpan.FromSeconds(30);
         private static readonly TimeSpan RescanDelay = TimeSpan.FromSeconds(45);
 
-        // Notification instances are transient, so the pending set is static: a burst of
-        // delete events (one per file of a bulk delete) collapses into one sweep per library.
         private static readonly ConcurrentDictionary<string, byte> PendingPurges = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
 
         public AudioBookShelf(IAudioBookShelfProxy proxy,
@@ -128,8 +126,6 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
             SendLibraryScans(libraryScans);
 
-            // A rename retires the old folder identity; sweep whatever the move left
-            // flagged so canonicalization renames do not strand ghost items.
             SchedulePurgeForDelete(libraryScans);
             ScheduleItemRescans(renamedFiles);
         }
@@ -306,10 +302,6 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
         public void PushBooksMetadata(List<(Book Book, List<BookFile> Files)> books)
         {
-            // Changing a book's metadata never renames its files, so no rename ever
-            // reaches AudioBookShelf and the items keep whatever they were first scanned
-            // with. Send the current values straight to the items, listing each library
-            // once however many books changed.
             var pushable = (books ?? new List<(Book, List<BookFile>)>())
                 .Where(x => x.Book != null && x.Files != null && x.Files.Count > 0)
                 .ToList();
@@ -453,8 +445,6 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
         private void ScheduleItemRescans(List<RenamedBookFile> renamedFiles)
         {
-            // A tracked move keeps the item's old metadata; ask AudioBookShelf to
-            // rescan the affected items so it re-reads the canonical OPF.
             if (renamedFiles == null || renamedFiles.Count == 0)
             {
                 return;
@@ -532,10 +522,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                                 continue;
                             }
 
-                            // Ask AudioBookShelf to re-read the folder FIRST. A scan
-                            // overwrites item metadata from the files, so pushing before
-                            // it means the canonical values are immediately discarded and
-                            // the item visibly flips back to whatever the file carries.
+                            // Scan first; metadata pushed before it is overwritten from the files.
                             _proxy.ScanItem(settings, item.Id);
                             _logger.Debug("AudioBookShelf: requested item rescan for '{0}'", rel);
 
@@ -558,9 +545,6 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
         private void SchedulePurgeForDelete(ISet<string> libraryScans)
         {
-            // Mapped deletes are handled with watcher updates and never enter the scan
-            // loop, so purge scheduling must not live there: sweep every library this
-            // connection covers, whichever notification path ran.
             if (!Settings.RemoveMissingItems)
             {
                 return;
@@ -597,9 +581,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 return;
             }
 
-            // The scan triggered alongside this purge flags freshly deleted files as
-            // missing asynchronously; wait it out before sweeping, or the sweep runs
-            // before anything is flagged and the ghost item survives.
+            // The scan flags deleted files as missing asynchronously; sweep after it.
             Task.Delay(PurgeDelay).ContinueWith(task =>
             {
                 PendingPurges.TryRemove(purgeKey, out _);
