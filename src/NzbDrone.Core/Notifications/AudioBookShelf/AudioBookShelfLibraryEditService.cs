@@ -6,6 +6,7 @@ using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Books;
 using NzbDrone.Core.MediaCover;
 using NzbDrone.Core.MediaFiles;
+using NzbDrone.Core.RootFolders;
 using NzbDrone.Core.Messaging.Events;
 using NzbDrone.Core.ThingiProvider;
 
@@ -17,18 +18,21 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
         private readonly IMediaFileService _mediaFileService;
         private readonly INotificationFactory _notificationFactory;
         private readonly INotificationStatusService _notificationStatusService;
+        private readonly IRootFolderService _rootFolderService;
         private readonly Logger _logger;
 
         public AudioBookShelfLibraryEditService(IBookService bookService,
                                                 IMediaFileService mediaFileService,
                                                 INotificationFactory notificationFactory,
                                                 INotificationStatusService notificationStatusService,
+                                                IRootFolderService rootFolderService,
                                                 Logger logger)
         {
             _bookService = bookService;
             _mediaFileService = mediaFileService;
             _notificationFactory = notificationFactory;
             _notificationStatusService = notificationStatusService;
+            _rootFolderService = rootFolderService;
             _logger = logger;
         }
 
@@ -42,6 +46,15 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             if (author == null && message.Book != null)
             {
                 author = message.Book.Author;
+            }
+
+            if (author?.Path.IsNotNullOrWhiteSpace() == true &&
+                _rootFolderService.GetBestRootFolder(author.Path)?.IsCalibreLibrary == true)
+            {
+                // Books in a calibre-managed root folder follow the owning library;
+                // CalibreLibraryChangeForwarder propagates its values, and pushing
+                // Chaptarr's own would overwrite that forward.
+                return;
             }
 
             var blockedProviders = new HashSet<int>(_notificationStatusService.GetBlockedProviders().Select(v => v.ProviderId));

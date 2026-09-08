@@ -9,6 +9,7 @@ using NzbDrone.Core.MediaFiles;
 using NzbDrone.Core.Messaging.Commands;
 using NzbDrone.Core.Qualities;
 using NzbDrone.Core.Messaging.Events;
+using NzbDrone.Core.RootFolders;
 
 namespace NzbDrone.Core.Notifications.CalibreContentServer
 {
@@ -18,18 +19,21 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
         private readonly IMediaFileService _mediaFileService;
         private readonly INotificationFactory _notificationFactory;
         private readonly IManageCommandQueue _commandQueueManager;
+        private readonly IRootFolderService _rootFolderService;
         private readonly Logger _logger;
 
         public RePushBookService(IBookService bookService,
                                  IMediaFileService mediaFileService,
                                  INotificationFactory notificationFactory,
                                  IManageCommandQueue commandQueueManager,
+                                 IRootFolderService rootFolderService,
                                  Logger logger)
         {
             _bookService = bookService;
             _mediaFileService = mediaFileService;
             _notificationFactory = notificationFactory;
             _commandQueueManager = commandQueueManager;
+            _rootFolderService = rootFolderService;
             _logger = logger;
         }
 
@@ -110,6 +114,17 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
             var book = _bookService.GetBook(bookId);
 
             if (book == null)
+            {
+                return;
+            }
+
+            // A book in a calibre-managed root folder gets its record metadata from the
+            // owning library, forwarded by CalibreLibraryChangeForwarder. A canonical
+            // push here would overwrite that forward with Chaptarr's values moments
+            // after it landed.
+            if (metadataOnly &&
+                book.Author?.Path.IsNotNullOrWhiteSpace() == true &&
+                _rootFolderService.GetBestRootFolder(book.Author.Path)?.IsCalibreLibrary == true)
             {
                 return;
             }
