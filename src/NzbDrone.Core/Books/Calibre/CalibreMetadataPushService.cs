@@ -17,6 +17,12 @@ namespace NzbDrone.Core.Books.Calibre
     public class CalibreMetadataPushService : IExecute<PushCalibreMetadataCommand>, IHandle<BookFileAddedEvent>, IHandle<MediaCoversUpdatedEvent>
     {
         public static readonly string[] IdentityFields = { "title", "authors" };
+
+        // The cover finishes downloading after the pickup push, so a covers-updated event
+        // completes that initial push - but only that. Later cover churn (refreshes, the
+        // daily repair task, reconciliation) must not overwrite artwork set in the library.
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTime> RecentImportPushes = new System.Collections.Concurrent.ConcurrentDictionary<int, DateTime>();
+        private static readonly TimeSpan ImportCoverWindow = TimeSpan.FromMinutes(15);
         public static readonly string[] AllFields =
         {
             "cover", "title", "authors", "series", "comments", "publisher",
@@ -128,6 +134,7 @@ namespace NzbDrone.Core.Books.Calibre
 
             try
             {
+                RecentImportPushes[book.Id] = DateTime.UtcNow;
                 PushBook(book.Id, rootFolder.AutoPushCalibreMetadata ? AllFields : IdentityFields);
             }
             catch (Exception ex)
@@ -158,6 +165,16 @@ namespace NzbDrone.Core.Books.Calibre
             var rootFolder = _rootFolderService.GetBestRootFolder(author.Path);
 
             if (rootFolder?.IsCalibreLibrary != true || !rootFolder.AutoPushCalibreMetadata)
+            {
+                return;
+            }
+
+            foreach (var stale in RecentImportPushes.Where(p => DateTime.UtcNow - p.Value > ImportCoverWindow).Select(p => p.Key).ToList())
+            {
+                RecentImportPushes.TryRemove(stale, out _);
+            }
+
+            if (!RecentImportPushes.TryRemove(book.Id, out _))
             {
                 return;
             }
