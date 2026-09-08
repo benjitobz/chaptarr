@@ -182,6 +182,7 @@ class BookDetails extends Component {
                     label={translate('ResendToCalibre')}
                     title={translate('ResendToCalibreContentServerConnections')}
                     iconName={icons.EXPORT}
+                    isDisabled={!hasBookFiles}
                     isSpinning={isRePushing}
                     onPress={onRePushPress}
                   />
