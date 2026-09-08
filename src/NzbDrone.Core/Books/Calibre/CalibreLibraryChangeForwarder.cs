@@ -30,7 +30,7 @@ namespace NzbDrone.Core.Books.Calibre
         // which stay the source for identity and its own pushes.
         private static readonly TimeSpan DebounceDelay = TimeSpan.FromSeconds(30);
 
-        private readonly ConcurrentDictionary<string, (DateTime LastModified, int BookId)> _lastSeen = new ConcurrentDictionary<string, (DateTime LastModified, int BookId)>(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, (DateTime LastModified, int BookId, string Title, string Author)> _lastSeen = new ConcurrentDictionary<string, (DateTime LastModified, int BookId, string Title, string Author)>(StringComparer.Ordinal);
         private readonly ConcurrentDictionary<int, FileSystemWatcher> _watchers = new ConcurrentDictionary<int, FileSystemWatcher>();
         private readonly ConcurrentDictionary<int, byte> _pendingRootFolders = new ConcurrentDictionary<int, byte>();
         private readonly System.Timers.Timer _debounce;
@@ -247,17 +247,28 @@ namespace NzbDrone.Core.Books.Calibre
 
                 _lastSeen.TryRemove(pair.Key, out _);
 
-                if (!deleters.Any() || pair.Value.BookId <= 0)
+                if (!deleters.Any() || pair.Value.Title.IsNullOrWhiteSpace())
                 {
                     continue;
                 }
 
-                var deletedBook = _bookService.GetBook(pair.Value.BookId);
+                // Refreshes replace book rows constantly; the remembered title and author
+                // are enough for the mirror lookup even when the row is gone.
+                Book deletedBook = null;
 
-                if (deletedBook == null)
+                try
                 {
-                    continue;
+                    deletedBook = pair.Value.BookId > 0 ? _bookService.GetBook(pair.Value.BookId) : null;
                 }
+                catch (Exception)
+                {
+                }
+
+                deletedBook ??= new Book
+                {
+                    Title = pair.Value.Title,
+                    Author = new Author { Name = pair.Value.Author }
+                };
 
                 foreach (var deleter in deleters)
                 {
@@ -285,32 +296,21 @@ namespace NzbDrone.Core.Books.Calibre
 
                 if (!_lastSeen.TryGetValue(key, out var previous))
                 {
-                    _lastSeen[key] = (record.LastModified.Value, ResolveBookId(files));
+                    var baseline = ResolveBook(files);
+                    _lastSeen[key] = (record.LastModified.Value, baseline?.Id ?? 0, baseline?.Title, baseline?.Author?.Name);
                     continue;
                 }
-
-                var bookId = previous.BookId > 0 ? previous.BookId : ResolveBookId(files);
 
                 if (record.LastModified.Value <= previous.LastModified)
                 {
-                    if (bookId != previous.BookId)
-                    {
-                        _lastSeen[key] = (previous.LastModified, bookId);
-                    }
-
                     continue;
                 }
 
-                _lastSeen[key] = (record.LastModified.Value, bookId);
+                var book = ResolveBook(files);
 
-                if (!mirrors.Any() && !shelves.Any())
-                {
-                    continue;
-                }
+                _lastSeen[key] = (record.LastModified.Value, book?.Id ?? previous.BookId, book?.Title ?? previous.Title, book?.Author?.Name ?? previous.Author);
 
-                var book = bookId > 0 ? _bookService.GetBook(bookId) : null;
-
-                if (book == null)
+                if (book == null || (!mirrors.Any() && !shelves.Any()))
                 {
                     continue;
                 }
@@ -345,11 +345,18 @@ namespace NzbDrone.Core.Books.Calibre
             }
         }
 
-        private int ResolveBookId(List<MediaFiles.BookFile> files)
+        private Book ResolveBook(List<MediaFiles.BookFile> files)
         {
-            var edition = _editionService.GetEdition(files.First().EditionId);
+            try
+            {
+                var edition = _editionService.GetEdition(files.First().EditionId);
 
-            return edition?.BookId ?? 0;
+                return edition == null ? null : _bookService.GetBook(edition.BookId);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         private static AudioBookShelfItemMetadata BuildShelfPayload(Book book, CalibreBook record)
