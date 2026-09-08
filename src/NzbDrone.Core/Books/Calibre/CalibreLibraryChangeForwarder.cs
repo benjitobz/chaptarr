@@ -254,9 +254,19 @@ namespace NzbDrone.Core.Books.Calibre
 
                 // The mirror lookup matches by title and author, so deleting one copy of
                 // a duplicated book must not take the survivor's mirror record with it.
-                if (records.Any(r => r != null && string.Equals(r.Title?.Trim(), pair.Value.Title?.Trim(), StringComparison.OrdinalIgnoreCase)))
+                // Chaptarr's title and the library's can differ, so match survivors by
+                // the book they belong to, falling back to the title.
+                var survivesAsBook = pair.Value.BookId > 0 && _lastSeen.Any(other =>
+                    other.Key != pair.Key &&
+                    other.Key.StartsWith(prefix, StringComparison.Ordinal) &&
+                    other.Value.BookId == pair.Value.BookId &&
+                    returned.Contains(int.Parse(other.Key.Substring(prefix.Length))));
+
+                var survivesAsTitle = records.Any(r => r != null && string.Equals(r.Title?.Trim(), pair.Value.Title?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+                if (survivesAsBook || survivesAsTitle)
                 {
-                    _logger.Debug("The library still holds another record titled '{0}'; not carrying the deletion", pair.Value.Title);
+                    _logger.Debug("The library still holds another copy of '{0}'; not carrying the deletion", pair.Value.Title);
                     continue;
                 }
 
