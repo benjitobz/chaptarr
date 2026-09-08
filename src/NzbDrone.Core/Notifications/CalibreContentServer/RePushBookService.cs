@@ -15,18 +15,21 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
     public class RePushBookService : IExecute<RePushBookCommand>, IHandle<MediaCoversUpdatedEvent>
     {
         private readonly IBookService _bookService;
+        private readonly IEditionService _editionService;
         private readonly IMediaFileService _mediaFileService;
         private readonly INotificationFactory _notificationFactory;
         private readonly IManageCommandQueue _commandQueueManager;
         private readonly Logger _logger;
 
         public RePushBookService(IBookService bookService,
+                                 IEditionService editionService,
                                  IMediaFileService mediaFileService,
                                  INotificationFactory notificationFactory,
                                  IManageCommandQueue commandQueueManager,
                                  Logger logger)
         {
             _bookService = bookService;
+            _editionService = editionService;
             _mediaFileService = mediaFileService;
             _notificationFactory = notificationFactory;
             _commandQueueManager = commandQueueManager;
@@ -123,6 +126,9 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
                 _logger.Info("No ebook files on disk for {0}, nothing to push", book.Title);
                 return;
             }
+
+            // EnsureBookCovers refuses to reconcile a cover without hydrated editions.
+            book.Editions = _editionService.GetEditionsByBook(book.Id);
 
             var pushedConnectors = 0;
 

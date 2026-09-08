@@ -27,6 +27,7 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
         private static readonly ConcurrentDictionary<string, DateTime> RecentlyPushedPaths = new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, (int MirrorId, DateTime Added)> RecentlyAddedMirrorIds = new ConcurrentDictionary<string, (int MirrorId, DateTime Added)>(StringComparer.OrdinalIgnoreCase);
         private static readonly TimeSpan RecentPushWindow = TimeSpan.FromMinutes(5);
+        private static readonly object[] PushLocks = Enumerable.Range(0, 16).Select(_ => new object()).ToArray();
 
         private readonly IHttpClient _httpClient;
         private readonly IRootFolderService _rootFolderService;
@@ -119,7 +120,6 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
         {
             if (Settings.SyncChanges)
             {
-                RecentlyAddedMirrorIds.TryRemove(MirrorIdKey(message.Book), out _);
                 DeleteBook(message.Book);
             }
         }
@@ -310,36 +310,42 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 
         private int PushFile(int knownMirrorId, Book book, string path)
         {
-            var mirrorId = knownMirrorId;
-
-            if (mirrorId == 0)
+            // Formats of one book can arrive on different handler threads and adding is
+            // not idempotent, so resolving-or-adding the mirror record must be atomic
+            // per book and connection.
+            lock (PushLocks[(uint)MirrorIdKey(book).GetHashCode() % PushLocks.Length])
             {
-                mirrorId = RecentlyAddedMirrorId(book);
+                var mirrorId = knownMirrorId;
+
+                if (mirrorId == 0)
+                {
+                    mirrorId = RecentlyAddedMirrorId(book);
+                }
+
+                if (mirrorId == 0)
+                {
+                    mirrorId = FindMirrorBookIds(book).Select(int.Parse).FirstOrDefault();
+                }
+
+                if (mirrorId > 0)
+                {
+                    PushFormat(mirrorId, path);
+                    return mirrorId;
+                }
+
+                var added = AddBook(path);
+
+                if (added > 0)
+                {
+                    // A freshly added record carries the file's embedded metadata until the
+                    // canonical write lands, so a push in that window cannot find it by
+                    // author and title and would add the book again.
+                    RecentlyAddedMirrorIds[MirrorIdKey(book)] = (added, DateTime.UtcNow);
+                    SetCanonicalMetadata(added, book);
+                }
+
+                return added;
             }
-
-            if (mirrorId == 0)
-            {
-                mirrorId = FindMirrorBookIds(book).Select(int.Parse).FirstOrDefault();
-            }
-
-            if (mirrorId > 0)
-            {
-                PushFormat(mirrorId, path);
-                return mirrorId;
-            }
-
-            var added = AddBook(path);
-
-            if (added > 0)
-            {
-                // A freshly added record carries the file's embedded metadata until the
-                // canonical write lands, so a push in that window cannot find it by
-                // author and title and would add the book again.
-                RecentlyAddedMirrorIds[MirrorIdKey(book)] = (added, DateTime.UtcNow);
-                SetCanonicalMetadata(added, book);
-            }
-
-            return added;
         }
 
         private string MirrorIdKey(Book book)
@@ -497,6 +503,8 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 
         private void DeleteBook(Book book)
         {
+            RecentlyAddedMirrorIds.TryRemove(MirrorIdKey(book), out _);
+
             var matches = FindMirrorBookIds(book);
 
             if (matches.Any())
@@ -543,6 +551,7 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
                 }
                 else
                 {
+                    RecentlyAddedMirrorIds.TryRemove(MirrorIdKey(book), out _);
                     DeleteRecords(new List<string> { record.Key }, book.Title);
                 }
             }
