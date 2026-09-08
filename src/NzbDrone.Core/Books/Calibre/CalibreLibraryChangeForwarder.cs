@@ -30,7 +30,7 @@ namespace NzbDrone.Core.Books.Calibre
         // which stay the source for identity and its own pushes.
         private static readonly TimeSpan DebounceDelay = TimeSpan.FromSeconds(30);
 
-        private readonly ConcurrentDictionary<string, DateTime> _lastSeen = new ConcurrentDictionary<string, DateTime>(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, (DateTime LastModified, int BookId)> _lastSeen = new ConcurrentDictionary<string, (DateTime LastModified, int BookId)>(StringComparer.Ordinal);
         private readonly ConcurrentDictionary<int, FileSystemWatcher> _watchers = new ConcurrentDictionary<int, FileSystemWatcher>();
         private readonly ConcurrentDictionary<int, byte> _pendingRootFolders = new ConcurrentDictionary<int, byte>();
         private readonly System.Timers.Timer _debounce;
@@ -225,28 +225,34 @@ namespace NzbDrone.Core.Books.Calibre
                 return;
             }
 
-            // A tracked record the library no longer returns was deleted there; carry
-            // the deletion to the mirrors once its files are really gone from disk too.
+            // A remembered record the library no longer returns was deleted there. The
+            // scan that notices the vanished files can clean the tracked rows before this
+            // pass runs, so the book is remembered here rather than looked up through them.
             var returned = new HashSet<int>(records.Where(r => r != null).Select(r => r.Id));
+            var prefix = rootFolder.Id + ":";
 
-            foreach (var missingId in filesByCalibreId.Keys.Where(id => !returned.Contains(id)).ToList())
+            foreach (var pair in _lastSeen.Where(p => p.Key.StartsWith(prefix, StringComparison.Ordinal)).ToList())
             {
-                var missingFiles = filesByCalibreId[missingId];
+                var calibreId = int.Parse(pair.Key.Substring(prefix.Length));
 
-                if (missingFiles.Any(f => File.Exists(f.Path)))
+                if (returned.Contains(calibreId))
                 {
                     continue;
                 }
 
-                _lastSeen.TryRemove(rootFolder.Id + ":" + missingId, out _);
-
-                if (!deleters.Any())
+                if (filesByCalibreId.TryGetValue(calibreId, out var missingFiles) && missingFiles.Any(f => File.Exists(f.Path)))
                 {
                     continue;
                 }
 
-                var deletedEdition = _editionService.GetEdition(missingFiles.First().EditionId);
-                var deletedBook = deletedEdition == null ? null : _bookService.GetBook(deletedEdition.BookId);
+                _lastSeen.TryRemove(pair.Key, out _);
+
+                if (!deleters.Any() || pair.Value.BookId <= 0)
+                {
+                    continue;
+                }
+
+                var deletedBook = _bookService.GetBook(pair.Value.BookId);
 
                 if (deletedBook == null)
                 {
@@ -272,31 +278,37 @@ namespace NzbDrone.Core.Books.Calibre
             {
                 var key = rootFolder.Id + ":" + record.Id;
 
+                if (!filesByCalibreId.TryGetValue(record.Id, out var files))
+                {
+                    continue;
+                }
+
                 if (!_lastSeen.TryGetValue(key, out var previous))
                 {
-                    _lastSeen[key] = record.LastModified.Value;
+                    _lastSeen[key] = (record.LastModified.Value, ResolveBookId(files));
                     continue;
                 }
 
-                if (record.LastModified.Value <= previous)
+                var bookId = previous.BookId > 0 ? previous.BookId : ResolveBookId(files);
+
+                if (record.LastModified.Value <= previous.LastModified)
                 {
+                    if (bookId != previous.BookId)
+                    {
+                        _lastSeen[key] = (previous.LastModified, bookId);
+                    }
+
                     continue;
                 }
 
-                _lastSeen[key] = record.LastModified.Value;
+                _lastSeen[key] = (record.LastModified.Value, bookId);
 
                 if (!mirrors.Any() && !shelves.Any())
                 {
                     continue;
                 }
 
-                if (!filesByCalibreId.TryGetValue(record.Id, out var files))
-                {
-                    continue;
-                }
-
-                var edition = _editionService.GetEdition(files.First().EditionId);
-                var book = edition == null ? null : _bookService.GetBook(edition.BookId);
+                var book = bookId > 0 ? _bookService.GetBook(bookId) : null;
 
                 if (book == null)
                 {
@@ -331,6 +343,13 @@ namespace NzbDrone.Core.Books.Calibre
 
                 _logger.Info("Forwarded a library edit of '{0}' to {1} connection(s)", record.Title, mirrors.Count + shelves.Count);
             }
+        }
+
+        private int ResolveBookId(List<MediaFiles.BookFile> files)
+        {
+            var edition = _editionService.GetEdition(files.First().EditionId);
+
+            return edition?.BookId ?? 0;
         }
 
         private static AudioBookShelfItemMetadata BuildShelfPayload(Book book, CalibreBook record)
