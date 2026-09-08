@@ -182,7 +182,6 @@ namespace Chaptarr.Api.V1.Books
                              .When(s => s.Author != null && s.Author.Path.IsNullOrWhiteSpace() && !s.Author.RootFolderPath.IsNullOrWhiteSpace());
 	        }
 
-
         private ActionResult GetProviderAmbiguityResult(ProviderAmbiguityResource ambiguity)
         {
             return ambiguity == null ? null : StatusCode(ProviderAmbiguityHelper.StatusCode, ambiguity);
@@ -1883,8 +1882,6 @@ namespace Chaptarr.Api.V1.Books
 
                 if (unresolved.Count > 0)
                 {
-                    // A proxy url that outlived its cache entry describes nothing; persisting
-                    // it would overwrite real image data with a dead link.
                     _logger.Debug("Dropping {0} cover(s) on edition {1} whose proxy urls could no longer be resolved", unresolved.Count, edition.Id);
                     edition.Images = edition.Images.Except(unresolved).ToList();
                 }

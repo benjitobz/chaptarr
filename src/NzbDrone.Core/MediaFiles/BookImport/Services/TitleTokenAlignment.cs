@@ -76,9 +76,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                     !(index > 0 && index < requiredTokens.Count - 1 && IsStructuralGlueToken(token)))
                 .ToList();
 
-            // A branded prefix that repeats a title word ("The Lord of the Rings 2 - The
-            // Two Towers" vs "The Two Towers") makes the greedy anchor swallow the prefix
-            // and fail the gap rule, so slide the anchor forward until a clean window fits.
             var searchStart = 0;
 
             while (searchStart < fieldTokens.Count)

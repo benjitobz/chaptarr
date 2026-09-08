@@ -180,9 +180,7 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                 return null;
             }
 
-            // "Title (2019)" is far more likely a publication year than a calibre id, so
-            // only collapse across differently spelled folders for ids outside that range.
-            // Every parenthesized-id folder still groups all of its own files as one unit.
+            // Ids in this range are far more likely publication years than calibre ids.
             if (folderId >= 1900 && folderId <= 2100)
             {
                 return NormalizeDirectory(directory);

@@ -137,7 +137,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
             public string LogicalWorkKey { get; set; }
         }
 
-
         private sealed class HolyGrailAttemptResult
         {
             public FileMatch Match { get; set; }
@@ -3830,7 +3829,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
             return Regex.Replace(sb.ToString(), "\\s+", " ").Trim();
         }
 
-
         private HolyGrailAttemptResult TryMatchWithHolyGrail(
             DiscoveredFileWithMetadata file,
             BookMediaType mediaType,
@@ -4145,7 +4143,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
 
             return clone;
         }
-
 
         private string NormalizeForPathTokens(string text)
         {
@@ -5629,8 +5626,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 if (queryWord != null &&
                     (IsAdjacentConcatenation(candidateWord, queryTokens) || IsAdjacentConcatenation(queryWord, candidateTokens)))
                 {
-                    // "Lightbringer" vs "Light Bringer": one side merely joins the other's
-                    // adjacent words, so this is the same title, not a substitution.
                     candidateWord = null;
                     queryWord = null;
                     return false;
@@ -6681,7 +6676,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                     return acceptedEvidence;
                 }
 
-
                 var fileYear = TryExtractYearFromTags(allTags);
                 if (stagedFtsUsed)
                 {
@@ -6878,7 +6872,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                                 }
                             }
 
-
                         }
                         catch
                         {
@@ -7069,7 +7062,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
 
                         return null;
                     }
-
 
                     var scoredCandidate = ScoreCandidate(
                         result,
@@ -7641,7 +7633,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 {
                     scored.PublisherMatchCount = PublisherTokenMatchCount(candidate.Publisher, tagTokens);
                 }
-
 
                     // Series name match — majority of tokens must appear (Python parity)
                     var book = TryGetBookCached(candidate.BookId, booksById);
@@ -8570,7 +8561,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                     }
                 }
 
-
                 if (candidate.ReadingFormatId.HasValue)
                 {
                     var formatSignal = new MatchSignal
@@ -9163,8 +9153,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 cmp = a.NarratorMatchCount.CompareTo(b.NarratorMatchCount);
                 if (cmp != 0) return cmp;
 
-
-
                 cmp = a.AuthorMatch.CompareTo(b.AuthorMatch);
                 if (cmp != 0) return cmp;
 
@@ -9232,7 +9220,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                 cmp = a.TitleEvidenceTier.CompareTo(b.TitleEvidenceTier);
                 if (cmp != 0) return cmp;
 
-
                 cmp = (a.YearDiff == 0).CompareTo(b.YearDiff == 0);
                 if (cmp != 0) return cmp;
 
@@ -9244,7 +9231,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
 
                 cmp = a.PublisherMatchCount.CompareTo(b.PublisherMatchCount);
                 if (cmp != 0) return cmp;
-
 
                 cmp = a.AuthorMatch.CompareTo(b.AuthorMatch);
                 if (cmp != 0) return cmp;
@@ -9299,7 +9285,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
 
                 return true;
             }
-
 
                 private int PublisherTokenMatchCount(string publisher, HashSet<string> tagTokens)
                 {
@@ -10772,7 +10757,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
 
             return Array.Empty<EditionTitleEvidence>();
         }
-
 
         private bool SeriesNameMatches(string desiredSeriesName, string candidateSeriesName)
         {

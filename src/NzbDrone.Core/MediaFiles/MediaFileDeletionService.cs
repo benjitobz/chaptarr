@@ -179,8 +179,6 @@ namespace NzbDrone.Core.MediaFiles
             {
                 if (bookFile?.Path != null && !_diskProvider.FileExistsCanonical(bookFile.Path))
                 {
-                    // Another cleanup path (such as the calibre record deletion) already
-                    // removed this file; the missing record is success, not failure.
                     _logger.Debug(e, "Book file was already removed: {0}", bookFile.Path);
                     return;
                 }
@@ -205,8 +203,7 @@ namespace NzbDrone.Core.MediaFiles
                         continue;
                     }
 
-                    // The author's books and editions are already gone from the database when this event
-                    // fires, so an author-id query returns nothing. Find the rows by path instead.
+                    // The rows are already gone from the database when this fires; find them by path.
                     var books = _mediaFileService.GetFilesWithBasePath(folder) ?? new List<BookFile>();
 
                     foreach (var bookFile in books.Where(f => f.CalibreId == 0))
@@ -282,10 +279,7 @@ namespace NzbDrone.Core.MediaFiles
 
                     if (deleteRootFolder?.IsCalibreLibrary == true && deleteRootFolder.CalibreSettings != null)
                     {
-                        // The sync handler already deleted the calibre records Chaptarr tracked, but
-                        // the folder can still hold books calibre knows and Chaptarr never imported;
-                        // recycling those would leave calibre records pointing at nothing. Remove only
-                        // the tracked leftovers (audiobooks, replicas) and leave the folder to calibre.
+                        // Recycle only the tracked leftovers; the rest of the folder belongs to calibre.
                         foreach (var trackedFile in (_mediaFileService.GetFilesWithBasePath(folder) ?? new List<BookFile>())
                                      .Where(f => f.Path.IsNotNullOrWhiteSpace()))
                         {

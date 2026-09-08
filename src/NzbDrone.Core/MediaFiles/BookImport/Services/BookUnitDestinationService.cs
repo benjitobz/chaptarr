@@ -83,12 +83,9 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                 throw new ArgumentException("Canonical book/edition must be provided for destination resolution");
             }
 
+            // Calibre keeps every format on one record; never clone per-unit copies in calibre roots.
             if (IsCalibreLibraryBook(canonicalBook))
             {
-                // Calibre owns multi-format grouping: one record holds every format of a
-                // book. Cloning a second Chaptarr book for another format (or a branded
-                // re-upload's edition) fragments the library, so always route calibre
-                // units to the canonical book's edition and never clone.
                 var calibreEditionId = ResolveEditionIdForDestination(canonicalBook, canonicalEdition);
                 return (canonicalBook.Id, calibreEditionId);
             }
@@ -165,8 +162,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             // when they match different editions of the same work
             var existingFiles = _mediaFileService.GetFilesByBook(canonicalBook.Id) ?? new List<BookFile>();
 
-            // Rows whose files are gone from disk (e.g. the book was just deleted in calibre and re-uploaded
-            // before cleanup ran) are not evidence of another physical copy and must not force a unit clone.
             var staleRowCount = existingFiles.RemoveAll(f => string.IsNullOrWhiteSpace(f?.Path) || !_diskProvider.FileExists(f.Path));
             if (staleRowCount > 0)
             {
@@ -197,8 +192,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                 return dest1;
             }
 
-            // Sibling ebook formats of one release (epub/azw3/mobi in the same folder) are
-            // renditions of the same physical unit, never a second copy to clone for.
             if (canonicalBook.MediaType == BookMediaType.Ebook)
             {
                 var incomingBaseKey = StripUnitKeyExtension(unitKey);
@@ -229,9 +222,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
 
                 if (path.IsNullOrWhiteSpace() && book != null && book.AuthorId > 0)
                 {
-                    // The book handed to the resolver often has its Author lazy-unset;
-                    // load it so a calibre-library book is still recognized (otherwise the
-                    // clone guard silently no-ops and a duplicate row gets created).
                     path = _authorService.GetAuthor(book.AuthorId)?.Path;
                 }
 

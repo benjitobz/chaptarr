@@ -27,9 +27,6 @@ namespace NzbDrone.Core.Books.Calibre
 
             var bookTokens = Tokenize(book.Title);
 
-            // Providers hand back several series per work: translated edition series,
-            // box-set splits, and umbrella universes. Prefer the broadest series so the
-            // whole run of an author's related books lands on one consistent sequence.
             return links
                 .OrderBy(x => ContainsNonAscii(x.Series.Value.Title) ? 1 : 0)
                 .ThenByDescending(x => x.Series.Value.WorkCount)
@@ -37,6 +34,16 @@ namespace NzbDrone.Core.Books.Calibre
                 .ThenByDescending(x => x.IsPrimary)
                 .ThenBy(x => x.SeriesPosition)
                 .FirstOrDefault();
+        }
+
+        public static HashSet<string> KnownSeriesTitles(Book book)
+        {
+            var titles = book?.SeriesLinks?
+                .Select(x => x?.Series?.Value?.Title)
+                .Where(t => t.IsNotNullOrWhiteSpace())
+                .ToList() ?? new List<string>();
+
+            return new HashSet<string>(titles, StringComparer.OrdinalIgnoreCase);
         }
 
         private static HashSet<string> Tokenize(string value)

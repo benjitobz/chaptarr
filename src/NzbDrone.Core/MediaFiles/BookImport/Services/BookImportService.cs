@@ -934,8 +934,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
 
                 var mediaType = book.MediaType == BookMediaType.Audiobook ? "audiobook" : "ebook";
 
-                // SetBookMonitored is the cross-format-synchronized mutation surface: with the
-                // author's sync flag on, monitoring this row also monitors its sibling format.
                 _bookService.SetBookMonitored(book.Id, true);
 
                 if (book.MediaType == BookMediaType.Audiobook)

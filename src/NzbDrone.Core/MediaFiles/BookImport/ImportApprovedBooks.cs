@@ -39,7 +39,6 @@ using NzbDrone.Core.Messaging.Events;
     using NzbDrone.Core.Profiles.Qualities;
     using NzbDrone.Core.Qualities;
 
-
 namespace NzbDrone.Core.MediaFiles.BookImport
 {
     /// <summary>
@@ -485,11 +484,9 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                         }
 
                         // These are NEW files for the same book - create a new book instance for multiple copies.
-                        // Calibre keeps every format of a book on a single record, so an extra copy row
-                        // fragments the library: the canonicalizer later reaps the surplus calibre record
-                        // and leaves the copy stranded in Chaptarr with files that no longer exist.
                         BatchBookResult createResult = null;
 
+                        // Calibre keeps every format on one record; a copy row would fragment the library.
                         if (IsCalibreLibraryAuthor(author))
                         {
                             _logger.Debug("[ADDITIONAL-COPY] Calibre library owns multi-format grouping; importing '{0}' against the existing book instead of creating a copy",
@@ -1345,8 +1342,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
                             ? _rootFolderService.GetBestRootFolder(localBook.Author.Path)
                             : null;
 
-                        // Calibre only manages ebooks; audiobooks in a mixed calibre root are plain
-                        // file transfers.
                         var importExtension = (Path.GetExtension(bookFile.Path) ?? string.Empty).ToLowerInvariant();
                         var isAudioImport = MediaFileExtensions.AudioExtensions.Contains(importExtension);
 
@@ -1596,8 +1591,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport
             }
         }
 
-        // Writing a title or author moves the book, because calibre derives its folder from them.
-        // The row is saved after this runs, so point it at where the file actually landed.
         private void FollowCalibreRefile(BookFile bookFile, CalibreSettings settings)
         {
             var extension = Path.GetExtension(bookFile.Path).TrimStart('.');

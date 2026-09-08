@@ -46,6 +46,21 @@ function titleCase(value) {
   return String(value).replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function isUnderPath(childPath, parentPath) {
+  if (!childPath || !parentPath) {
+    return false;
+  }
+
+  if (childPath === parentPath) {
+    return true;
+  }
+
+  const separator = parentPath.includes('\\') ? '\\' : '/';
+  const parent = parentPath.endsWith(separator) ? parentPath : `${parentPath}${separator}`;
+
+  return childPath.startsWith(parent);
+}
+
 function buildCalibrePreview(book, author, edition) {
   const text = (value) => (value == null || value === '' ? null : String(value));
   const identifiers = [];
@@ -182,7 +197,7 @@ function createMapStateToProps() {
           shortDateFormat: uiSettings.shortDateFormat,
           author,
           calibrePreview: buildCalibrePreview(book, author, selectedEdition),
-          showPushToCalibre: rootFolders.some((f) => f.isCalibreLibrary && (author.path || '').startsWith(f.path)),
+          showPushToCalibre: rootFolders.some((f) => f.isCalibreLibrary && isUnderPath(author.path || '', f.path)),
           isPushingToCalibre,
           isRefreshing,
           isSearching,

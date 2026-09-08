@@ -88,9 +88,6 @@ namespace NzbDrone.Core.MediaFiles
                 .OrderBy(e => e.ExistingPath).ToList();
         }
 
-        // The author's stored path is only ever one of the per-media-type roots, so a
-        // whole-author calibre verdict would silently skip audiobook renames for a
-        // split-media author; judge each file by the root that actually contains it.
         private static bool IsCalibreManaged(List<RootFolder> rootFolders, string path)
         {
             if (path.IsNullOrWhiteSpace())

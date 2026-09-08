@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -17,17 +18,14 @@ namespace NzbDrone.Core.Books.Calibre
     public class CalibreMetadataPushService : IExecute<PushCalibreMetadataCommand>, IHandle<BookFileAddedEvent>, IHandle<MediaCoversUpdatedEvent>
     {
         public static readonly string[] IdentityFields = { "title", "authors" };
-
-        // The cover finishes downloading after the pickup push, so a covers-updated event
-        // completes that initial push - but only that. Later cover churn (refreshes, the
-        // daily repair task, reconciliation) must not overwrite artwork set in the library.
-        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, DateTime> RecentImportPushes = new System.Collections.Concurrent.ConcurrentDictionary<int, DateTime>();
-        private static readonly TimeSpan ImportCoverWindow = TimeSpan.FromMinutes(15);
         public static readonly string[] AllFields =
         {
             "cover", "title", "authors", "series", "comments", "publisher",
             "pubdate", "languages", "tags", "rating", "identifiers"
         };
+
+        private static readonly ConcurrentDictionary<int, DateTime> RecentImportPushes = new ConcurrentDictionary<int, DateTime>();
+        private static readonly TimeSpan ImportCoverWindow = TimeSpan.FromMinutes(15);
 
         private readonly IBookService _bookService;
         private readonly IAuthorService _authorService;
@@ -143,9 +141,6 @@ namespace NzbDrone.Core.Books.Calibre
             }
         }
 
-        // Cover downloads are deferred during an import, so the push that runs when a file is
-        // picked up finds no cover on disk yet and silently sends everything but the artwork.
-        // The cover lands a moment later - send it then, for root folders that push automatically.
         public void Handle(MediaCoversUpdatedEvent message)
         {
             var book = message.Book;
@@ -208,11 +203,10 @@ namespace NzbDrone.Core.Books.Calibre
 
             if (fields.Contains("cover", StringComparer.OrdinalIgnoreCase))
             {
-                // The stored cover file can lag the monitored edition - imports pin the
-                // edition that fits the files after the cover was downloaded - and a push
-                // sends the file, not what the page renders. Reconcile before reading it.
                 try
                 {
+                    // EnsureBookCovers refuses to reconcile a cover without hydrated editions.
+                    book.Editions = _editionService.GetEditionsByBook(book.Id);
                     _mediaCoverService.EnsureBookCovers(book);
                 }
                 catch (Exception ex)
@@ -322,10 +316,6 @@ namespace NzbDrone.Core.Books.Calibre
             return book;
         }
 
-        // Calibre derives a book's folder from its title and author, so writing either one moves the
-        // files. Nothing tells Chaptarr, and the next disk scan reads the folder it still points at
-        // as a deletion - unlinking the book and cascading that delete out to every connection.
-        // Follow the move instead.
         private void FollowCalibreRefile(List<BookFile> files, CalibreSettings settings)
         {
             foreach (var file in files.Where(f => f.CalibreId > 0))

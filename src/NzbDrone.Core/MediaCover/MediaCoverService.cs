@@ -31,11 +31,17 @@ namespace NzbDrone.Core.MediaCover
         Task<EnsureImageResult> EnsureAuthorImage(Author author, MediaCover cover);
     }
 
+    public interface IBookCoverSidecarReader
+    {
+        int? GetStoredCoverEditionId(int bookId);
+    }
+
 	    public class MediaCoverService :
 	        IHandleAsync<AuthorRefreshCompleteEvent>,
 	        IHandleAsync<AuthorDeletedEvent>,
 	        IHandleAsync<BookDeletedEvent>,
-	        IMapCoversToLocal
+	        IMapCoversToLocal,
+	        IBookCoverSidecarReader
 	    {
 
 	        private readonly IMediaCoverProxy _mediaCoverProxy;
@@ -1047,10 +1053,7 @@ namespace NzbDrone.Core.MediaCover
             }
         }
 
-        // Every edition of a book shares one cover file name, so a url that was mapped to that
-        // file no longer describes what the file holds once a different edition is written over
-        // it. Drop those mappings before overwriting, otherwise a later switch back reuses the
-        // wrong image and then stamps the sidecar as if it were right.
+        // Mappings at this file describe the previous edition once it is overwritten.
         private void ForgetCachedCoverPath(string fileName)
         {
             if (fileName.IsNullOrWhiteSpace())
@@ -1131,6 +1134,7 @@ namespace NzbDrone.Core.MediaCover
 
 	        private sealed class BookCoverMetadataSelectedEdition
 	        {
+	            public int? LocalEditionId { get; set; }
 	            public string EditionProviderId { get; set; }
 	            public string CoverUrl { get; set; }
 	            public DateTime? DownloadedAt { get; set; }
@@ -1165,6 +1169,11 @@ namespace NzbDrone.Core.MediaCover
 	                return null;
 	            }
 	        }
+
+        public int? GetStoredCoverEditionId(int bookId)
+        {
+            return TryReadBookCoverMetadata(bookId)?.SelectedEdition?.LocalEditionId;
+        }
 
         private void RemoveBookCoverArtifactsForProvenEditionChange(Book book)
         {
@@ -1635,6 +1644,7 @@ namespace NzbDrone.Core.MediaCover
                 {
                     SelectedEdition = new BookCoverMetadataSelectedEdition
                     {
+                        LocalEditionId = coverChoice.Edition.Id,
                         EditionProviderId = BookEditionIdentity.GetTrustedForeignEditionId(coverChoice.Edition),
                         CoverUrl = coverChoice.Cover.Url,
                         DownloadedAt = downloadedAt

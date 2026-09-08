@@ -153,10 +153,7 @@ namespace NzbDrone.Core.Books.Calibre
                 return false;
             }
 
-            // CWA metadata fetches may retitle a record mid-flight ("Title (Series Book 1)"),
-            // so a candidate extending the deleted title counts. Never the reverse, and only
-            // above a length floor: this result gates deletions, and a two-letter title would
-            // otherwise sweep up every record starting with those letters.
+            // CWA retitles mid-flight, so extensions of the deleted title count; the floor keeps short titles from sweeping.
             return targetTitles.Any(t =>
                 candidate.Equals(t, StringComparison.Ordinal) ||
                 (t.Length >= 6 && candidate.StartsWith(t, StringComparison.Ordinal)));

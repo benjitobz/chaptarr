@@ -62,15 +62,20 @@ namespace NzbDrone.Core.Books.Calibre
                 return;
             }
 
-            var canonicalIds = _bookService.GetBooksByAuthor(author.Id)
-                .Where(b => b != null && b.Id > 0)
-                .SelectMany(b => _mediaFileService.GetFilesByBook(b.Id))
-                .Where(f => f != null && f.CalibreId > 0)
-                .Select(f => f.CalibreId)
-                .Distinct()
-                .ToList();
+            var canonicalBooksByCalibreId = new Dictionary<int, Book>();
 
-            if (!canonicalIds.Any())
+            foreach (var book in _bookService.GetBooksByAuthor(author.Id).Where(b => b != null && b.Id > 0))
+            {
+                foreach (var file in _mediaFileService.GetFilesByBook(book.Id).Where(f => f != null && f.CalibreId > 0))
+                {
+                    if (!canonicalBooksByCalibreId.ContainsKey(file.CalibreId))
+                    {
+                        canonicalBooksByCalibreId[file.CalibreId] = book;
+                    }
+                }
+            }
+
+            if (canonicalBooksByCalibreId.Count == 0)
             {
                 return;
             }
@@ -87,15 +92,13 @@ namespace NzbDrone.Core.Books.Calibre
                 return;
             }
 
-            var canonicalIdSet = new HashSet<int>(canonicalIds);
-
-            foreach (var canonicalId in canonicalIds)
+            foreach (var pair in canonicalBooksByCalibreId)
             {
-                ReapDuplicateRecords(canonicalId, canonicalIdSet, libraryBooks, rootFolder.CalibreSettings);
+                ReapDuplicateRecords(pair.Key, pair.Value, canonicalBooksByCalibreId, libraryBooks, rootFolder.CalibreSettings);
             }
         }
 
-        private void ReapDuplicateRecords(int canonicalId, ISet<int> canonicalIds, List<CalibreBook> libraryBooks, CalibreSettings settings)
+        private void ReapDuplicateRecords(int canonicalId, Book canonicalBook, IReadOnlyDictionary<int, Book> canonicalBooksByCalibreId, List<CalibreBook> libraryBooks, CalibreSettings settings)
         {
             if (libraryBooks == null || libraryBooks.Count == 0)
             {
@@ -118,13 +121,25 @@ namespace NzbDrone.Core.Books.Calibre
                 return;
             }
 
+            var allowedPrefixTokens = new HashSet<string>(canonicalAuthors, StringComparer.Ordinal);
+            allowedPrefixTokens.UnionWith(SeriesTokens(canonicalBook));
+
             var duplicates = new List<int>();
 
             foreach (var candidate in libraryBooks)
             {
-                if (candidate == null || candidate.Id == canonicalId || canonicalIds.Contains(candidate.Id))
+                if (candidate == null || candidate.Id == canonicalId)
                 {
                     continue;
+                }
+
+                if (canonicalBooksByCalibreId.TryGetValue(candidate.Id, out var candidateBook))
+                {
+                    // Only the newer of two same-book records loses, so a pass can never delete both.
+                    if (candidateBook.Id != canonicalBook.Id || candidate.Id < canonicalId)
+                    {
+                        continue;
+                    }
                 }
 
                 if (!AuthorTokens(candidate).Overlaps(canonicalAuthors))
@@ -132,7 +147,7 @@ namespace NzbDrone.Core.Books.Calibre
                     continue;
                 }
 
-                if (!IsBrandedVariantOf(candidate, canonicalTitle))
+                if (!IsBrandedVariantOf(candidate, canonicalTitle, allowedPrefixTokens))
                 {
                     continue;
                 }
@@ -162,7 +177,13 @@ namespace NzbDrone.Core.Books.Calibre
             }
         }
 
-        private static bool IsBrandedVariantOf(CalibreBook candidate, string canonicalTitle)
+        private static readonly HashSet<string> BrandedPrefixStopTokens = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "the", "a", "an", "of", "and", "book", "books", "vol", "volume", "part", "no", "saga", "series", "trilogy",
+            "ii", "iii", "iv", "vi", "vii", "viii", "ix", "xi", "xii"
+        };
+
+        private static bool IsBrandedVariantOf(CalibreBook candidate, string canonicalTitle, ISet<string> allowedPrefixTokens)
         {
             var candidateTitle = NormalizeTitle(candidate?.Title);
 
@@ -181,15 +202,34 @@ namespace NzbDrone.Core.Books.Calibre
                 return false;
             }
 
-            // A branded variant is "Author Name Title"; a prefix made of anything else
-            // ("Second" in "Second Foundation") is a different book, not a duplicate.
+            // Only author or series noise may precede the title; "Second Foundation" is a different book.
             var prefixTokens = candidateTitle
                 .Substring(0, candidateTitle.Length - canonicalTitle.Length)
                 .Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-            var authorTokens = AuthorTokens(candidate);
+            return prefixTokens.All(token =>
+                token.Length <= 1 ||
+                token.All(char.IsDigit) ||
+                BrandedPrefixStopTokens.Contains(token) ||
+                allowedPrefixTokens.Contains(token));
+        }
 
-            return prefixTokens.All(token => token.Length <= 1 || authorTokens.Contains(token));
+        private static HashSet<string> SeriesTokens(Book book)
+        {
+            var tokens = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var title in CalibreSeriesSelector.KnownSeriesTitles(book))
+            {
+                foreach (var token in NormalizeTitle(title).Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (token.Length > 1)
+                    {
+                        tokens.Add(token);
+                    }
+                }
+            }
+
+            return tokens;
         }
 
         private static HashSet<string> AuthorTokens(CalibreBook book)

@@ -1,9 +1,6 @@
 using System;
-using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using NLog;
-using Newtonsoft.Json.Linq;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Books;
 using NzbDrone.Core.MediaFiles.Events;
@@ -16,27 +13,26 @@ namespace NzbDrone.Core.MediaCover
         private readonly IBookService _bookService;
         private readonly IEditionService _editionService;
         private readonly IMapCoversToLocal _mediaCoverService;
+        private readonly IBookCoverSidecarReader _sidecarReader;
         private readonly IEventAggregator _eventAggregator;
         private readonly Logger _logger;
 
         public BookCoverReconciliationService(IBookService bookService,
                                               IEditionService editionService,
                                               IMapCoversToLocal mediaCoverService,
+                                              IBookCoverSidecarReader sidecarReader,
                                               IEventAggregator eventAggregator,
                                               Logger logger)
         {
             _bookService = bookService;
             _editionService = editionService;
             _mediaCoverService = mediaCoverService;
+            _sidecarReader = sidecarReader;
             _eventAggregator = eventAggregator;
             _logger = logger;
         }
 
-        // The monitored edition can change outside a refresh or an explicit switch - file
-        // matching pins the edition that fits the files it just linked - and none of those
-        // paths revisit the cover, so the stored file keeps another edition's artwork. A scan
-        // is where those changes settle; reconcile any book whose stored cover no longer
-        // belongs to its monitored edition.
+        // File matching pins editions outside refreshes and nothing else revisits the cover; scans are where that settles.
         public void Handle(AuthorScannedEvent message)
         {
             var author = message.Author;
@@ -65,19 +61,35 @@ namespace NzbDrone.Core.MediaCover
                 }
 
                 var monitored = editions.FirstOrDefault(e => e.Monitored);
-                var storedEditionId = StoredCoverEditionId(book.Id);
 
-                if (monitored == null || storedEditionId == null || storedEditionId == monitored.Id)
+                if (monitored == null)
                 {
                     continue;
                 }
 
-                _logger.Debug("Cover for book {0} belongs to edition {1} but edition {2} is monitored; reconciling", book.Id, storedEditionId, monitored.Id);
+                var storedEditionId = _sidecarReader.GetStoredCoverEditionId(book.Id);
+                var coverDrift = storedEditionId != null && storedEditionId != monitored.Id;
+                var imagesDrift = HasImagesDrift(book, monitored);
+
+                if (!coverDrift && !imagesDrift)
+                {
+                    continue;
+                }
+
+                _logger.Debug("Cover state for book {0} does not match monitored edition {1} (stored edition {2}, images drift {3}); reconciling", book.Id, monitored.Id, storedEditionId, imagesDrift);
 
                 try
                 {
                     book.Editions = editions;
                     _mediaCoverService.EnsureBookCovers(book);
+
+                    if (imagesDrift)
+                    {
+                        // The UI renders the book row's denormalized images; realign them with the stored artwork.
+                        book.Images = monitored.Images;
+                        _bookService.UpdateBook(book);
+                    }
+
                     _eventAggregator.PublishEvent(new MediaCoversUpdatedEvent(book));
                 }
                 catch (Exception ex)
@@ -87,25 +99,18 @@ namespace NzbDrone.Core.MediaCover
             }
         }
 
-        private int? StoredCoverEditionId(int bookId)
+        private static bool HasImagesDrift(Book book, Edition monitored)
         {
-            try
-            {
-                var coverPath = _mediaCoverService.GetCoverPath(bookId, MediaCoverEntity.Book, MediaCoverTypes.Cover, "jpg");
-                var metadataPath = Path.Combine(Path.GetDirectoryName(coverPath), "cover-metadata.json");
+            var monitoredCoverUrl = monitored.Images?.FirstOrDefault(i => i?.CoverType == MediaCoverTypes.Cover)?.Url;
 
-                if (!File.Exists(metadataPath))
-                {
-                    return null;
-                }
-
-                return JObject.Parse(File.ReadAllText(metadataPath))["selectedEdition"]?["localEditionId"]?.Value<int?>();
-            }
-            catch (Exception ex)
+            if (monitoredCoverUrl.IsNullOrWhiteSpace())
             {
-                _logger.Debug(ex, "Unable to read the cover sidecar for book {0}", bookId);
-                return null;
+                return false;
             }
+
+            var bookCoverUrl = book.Images?.FirstOrDefault(i => i?.CoverType == MediaCoverTypes.Cover)?.Url;
+
+            return !monitoredCoverUrl.Equals(bookCoverUrl, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

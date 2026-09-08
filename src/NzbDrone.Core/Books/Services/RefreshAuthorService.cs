@@ -1543,13 +1543,9 @@ namespace NzbDrone.Core.Books
             }
 
             if (!string.IsNullOrWhiteSpace(book.UnitKeyHash) &&
+                // The grace window covers clones whose files are still attaching or converting.
                 (HasKnownFiles(book) || book.Added > DateTime.UtcNow.AddHours(-24)))
             {
-                // UnitKeyHash is the durable identity of an intentional multi-copy row while its
-                // physical copy exists; the grace window covers a fresh clone whose files are still
-                // attaching or converting, which can take hours on a backlogged queue. A file-less
-                // clone past that window is leftover from a deleted copy and may be merged away as
-                // a duplicate.
                 return true;
             }
 
@@ -1687,8 +1683,6 @@ namespace NzbDrone.Core.Books
 
             private void ConsumeStableWorkTokens(Book book)
             {
-                // Work identity is tracked per media type: an audiobook row consuming a
-                // work must never block the ebook row of the same work from being added.
                 if (!_consumedStableWorkTokensByType.TryGetValue(book.MediaType, out var tokens))
                 {
                     tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1895,11 +1889,10 @@ namespace NzbDrone.Core.Books
                 {
                     var providerIds = new HashSet<string>(ImportListExclusionBookMatcher.GetCanonicalProviderIds(book), StringComparer.OrdinalIgnoreCase);
 
+                    // Deleted with an exclusion; recreate the catalog row unmonitored so it stays gone.
                     if (providerIds.Count > 0 &&
                         deletionExclusions.Any(e => providerIds.Contains(e.ForeignId) && (!e.MediaType.HasValue || e.MediaType == book.MediaType)))
                     {
-                        // The user deleted this book with an import list exclusion;
-                        // recreate the catalog row unmonitored so it stays gone.
                         audioMonitor = false;
                         ebookMonitor = false;
                         _logger.Debug("[MONITORING-REFRESH] '{0}' was previously deleted with an exclusion; recreating unmonitored", book.Title);

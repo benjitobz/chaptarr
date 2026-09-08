@@ -37,9 +37,7 @@ namespace NzbDrone.Core.MediaFiles
                 return;
             }
 
-            // A refresh rescans when it finishes, so a fresh sync means these files
-            // were just retried and are genuinely unmatchable right now; without the
-            // cooldown this handler would refresh in a loop.
+            // A refresh rescans on completion; without the cooldown this would loop.
             if (author.LastInfoSync.HasValue && DateTime.UtcNow - author.LastInfoSync.Value < RefreshCooldown)
             {
                 return;
@@ -56,18 +54,14 @@ namespace NzbDrone.Core.MediaFiles
 
             var signature = string.Join("|", unmapped.Select(f => f.Path).OrderBy(p => p, StringComparer.OrdinalIgnoreCase));
 
+            // Already retried exactly these files; do not hammer the metadata server on every scan.
             if (AttemptedSignatures.TryGetValue(author.Id, out var previousSignature) && previousSignature == signature)
             {
-                // A refresh already retried exactly these files; repeating it on every scan
-                // would hammer the metadata server for files that will never match.
                 return;
             }
 
             AttemptedSignatures[author.Id] = signature;
 
-            // Files matching no catalog entry usually mean the work's row was deleted
-            // and not yet recreated; a refresh rebuilds the catalog and its rescan
-            // re-attempts the match.
             _logger.Info("Author {0} has {1} unmapped file(s); queueing a refresh to rebuild missing catalog entries", author.Name, unmapped.Count);
             _commandQueueManager.Push(new RefreshAuthorCommand { AuthorId = author.Id });
         }
