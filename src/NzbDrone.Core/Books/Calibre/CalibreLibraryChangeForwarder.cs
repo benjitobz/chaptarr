@@ -72,7 +72,7 @@ namespace NzbDrone.Core.Books.Calibre
             // against the library as it is now, not forwarded wholesale.
             foreach (var rootFolder in CalibreRootFolders())
             {
-                ForwardChangedRecords(rootFolder, new List<CalibreContentServer>(), new List<AudioBookShelf>());
+                ForwardChangedRecords(rootFolder, new List<CalibreContentServer>(), new List<AudioBookShelf>(), new List<CalibreContentServer>());
             }
         }
 
@@ -163,6 +163,11 @@ namespace NzbDrone.Core.Books.Calibre
                     .Where(c => ((CalibreContentServerSettings)c.Definition.Settings).PushLibraryEdits)
                     .ToList();
 
+                var deleters = _notificationFactory.GetAvailableProviders()
+                    .OfType<CalibreContentServer>()
+                    .Where(c => ((CalibreContentServerSettings)c.Definition.Settings).SyncChanges)
+                    .ToList();
+
                 var shelves = _notificationFactory.GetAvailableProviders()
                     .OfType<AudioBookShelf>()
                     .Where(s => ((AudioBookShelfSettings)s.Definition.Settings).PushLibraryEdits)
@@ -181,7 +186,7 @@ namespace NzbDrone.Core.Books.Calibre
 
                     try
                     {
-                        ForwardChangedRecords(rootFolder, mirrors, shelves);
+                        ForwardChangedRecords(rootFolder, mirrors, shelves, deleters);
                     }
                     catch (Exception ex)
                     {
@@ -196,7 +201,7 @@ namespace NzbDrone.Core.Books.Calibre
             return _rootFolderService.All().Where(r => r.IsCalibreLibrary && r.CalibreSettings != null);
         }
 
-        private void ForwardChangedRecords(RootFolder rootFolder, List<CalibreContentServer> mirrors, List<AudioBookShelf> shelves)
+        private void ForwardChangedRecords(RootFolder rootFolder, List<CalibreContentServer> mirrors, List<AudioBookShelf> shelves, List<CalibreContentServer> deleters)
         {
             var filesByCalibreId = _mediaFileService.GetFilesWithBasePath(rootFolder.Path)
                 .Where(f => f.CalibreId > 0)
@@ -218,6 +223,49 @@ namespace NzbDrone.Core.Books.Calibre
             {
                 _logger.Debug(ex, "Unable to read the calibre library under {0}", rootFolder.Path);
                 return;
+            }
+
+            // A tracked record the library no longer returns was deleted there; carry
+            // the deletion to the mirrors once its files are really gone from disk too.
+            var returned = new HashSet<int>(records.Where(r => r != null).Select(r => r.Id));
+
+            foreach (var missingId in filesByCalibreId.Keys.Where(id => !returned.Contains(id)).ToList())
+            {
+                var missingFiles = filesByCalibreId[missingId];
+
+                if (missingFiles.Any(f => File.Exists(f.Path)))
+                {
+                    continue;
+                }
+
+                _lastSeen.TryRemove(rootFolder.Id + ":" + missingId, out _);
+
+                if (!deleters.Any())
+                {
+                    continue;
+                }
+
+                var deletedEdition = _editionService.GetEdition(missingFiles.First().EditionId);
+                var deletedBook = deletedEdition == null ? null : _bookService.GetBook(deletedEdition.BookId);
+
+                if (deletedBook == null)
+                {
+                    continue;
+                }
+
+                foreach (var deleter in deleters)
+                {
+                    try
+                    {
+                        deleter.RemoveDeletedBook(deletedBook);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Debug(ex, "Unable to carry the library deletion of '{0}' to a content server", deletedBook.Title);
+                    }
+                }
+
+                _logger.Info("The library deleted '{0}'; removed it from {1} content server(s)", deletedBook.Title, deleters.Count);
             }
 
             foreach (var record in records.Where(r => r != null && r.LastModified.HasValue))

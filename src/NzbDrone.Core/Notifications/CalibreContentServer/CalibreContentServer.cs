@@ -115,6 +115,11 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
             return RecentlyPushedPaths.TryAdd($"{Definition.Id}:{path}", now);
         }
 
+        public void RemoveDeletedBook(Book book)
+        {
+            DeleteBook(book);
+        }
+
         public override void OnBookDelete(BookDeleteMessage message)
         {
             if (Settings.SyncChanges)
