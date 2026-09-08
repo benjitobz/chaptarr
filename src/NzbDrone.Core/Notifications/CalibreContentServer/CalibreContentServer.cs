@@ -21,9 +21,6 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 {
     public class CalibreContentServer : NotificationBase<CalibreContentServerSettings>
     {
-        // BookFileAddedEvent also fires for tracked downloads, which push through
-        // OnReleaseImport on another handler thread; instances are transient, so the
-        // claim set is static and keyed per definition.
         private static readonly ConcurrentDictionary<string, DateTime> RecentlyPushedPaths = new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, (int MirrorId, DateTime Added)> RecentlyAddedMirrorIds = new ConcurrentDictionary<string, (int MirrorId, DateTime Added)>(StringComparer.OrdinalIgnoreCase);
         private static readonly TimeSpan RecentPushWindow = TimeSpan.FromMinutes(5);
@@ -76,10 +73,6 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 
         private void RemoveReplacedFormats(int calibreId, List<NzbDrone.Core.MediaFiles.BookFile> oldFiles, List<NzbDrone.Core.MediaFiles.BookFile> newFiles)
         {
-            // An upgrade must not delete and re-add the whole record - that would churn
-            // the calibre id and destroy whatever the server side attached to it. The
-            // new files overwrite their formats in place; only drop extensions the
-            // upgrade no longer provides.
             var newExtensions = newFiles
                 .Select(f => (Path.GetExtension(f?.Path) ?? string.Empty).TrimStart('.'))
                 .Where(e => e.IsNotNullOrWhiteSpace())
@@ -162,8 +155,6 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 
             if (metadataOnly && mirrorBookId > 0)
             {
-                // Library edits only change the record; re-uploading every format on
-                // each refresh would send whole files for nothing.
                 SetCanonicalMetadata(mirrorBookId, book);
                 return true;
             }
@@ -204,8 +195,7 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 
             try
             {
-                // Book id 0 never exists, so this exercises cdb write permissions
-                // without ever creating or touching a record.
+                // Book id 0 never exists, so this probes write permission without touching a record.
                 var request = BuildRequest("cdb/delete-books/0").Build();
                 var anonymousProbe = Settings.Username.IsNullOrWhiteSpace();
 
@@ -310,9 +300,6 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 
         private int PushFile(int knownMirrorId, Book book, string path)
         {
-            // Formats of one book can arrive on different handler threads and adding is
-            // not idempotent, so resolving-or-adding the mirror record must be atomic
-            // per book and connection.
             lock (PushLocks[(uint)MirrorIdKey(book).GetHashCode() % PushLocks.Length])
             {
                 var mirrorId = knownMirrorId;
@@ -337,9 +324,6 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 
                 if (added > 0)
                 {
-                    // A freshly added record carries the file's embedded metadata until the
-                    // canonical write lands, so a push in that window cannot find it by
-                    // author and title and would add the book again.
                     RecentlyAddedMirrorIds[MirrorIdKey(book)] = (added, DateTime.UtcNow);
                     SetCanonicalMetadata(added, book);
                 }
@@ -660,9 +644,7 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 
         private static string[] TitleForms(string title)
         {
-            // A fully non-Latin title normalizes to an empty string; an empty form must
-            // never survive here, or every such title matches every other and the
-            // matches feed deletions.
+            // Empty forms must never survive; they would match every other non-Latin title.
             return new[] { Normalize(title), Normalize(Regex.Replace(title ?? string.Empty, @"\s*\([^)]*\)\s*$", "")) }
                 .Where(form => form.IsNotNullOrWhiteSpace())
                 .Distinct()
@@ -671,8 +653,7 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 
         private static bool TitlesMatch(IEnumerable<string> bookForms, IEnumerable<string> recordForms)
         {
-            // Exact normalized equality only: suffix heuristics match sibling titles
-            // ("Foundation" vs "Second Foundation") and this result gates deletions.
+            // Exact equality only; this result gates deletions.
             return bookForms
                 .Where(form => form.IsNotNullOrWhiteSpace())
                 .Intersect(recordForms.Where(form => form.IsNotNullOrWhiteSpace()), StringComparer.Ordinal)

@@ -38,8 +38,6 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 
         public void Handle(MediaCoversUpdatedEvent message)
         {
-            // Check for a subscribed connector before queueing anything: this event fires
-            // after every author refresh and would otherwise fill the queue with no-ops.
             if (!_notificationFactory.GetAvailableProviders()
                     .OfType<CalibreContentServer>()
                     .Any(c => ((CalibreContentServerSettings)c.Definition.Settings).PushLibraryEdits))
