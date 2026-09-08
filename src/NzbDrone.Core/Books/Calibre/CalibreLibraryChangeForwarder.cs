@@ -252,6 +252,14 @@ namespace NzbDrone.Core.Books.Calibre
                     continue;
                 }
 
+                // The mirror lookup matches by title and author, so deleting one copy of
+                // a duplicated book must not take the survivor's mirror record with it.
+                if (records.Any(r => r != null && string.Equals(r.Title?.Trim(), pair.Value.Title?.Trim(), StringComparison.OrdinalIgnoreCase)))
+                {
+                    _logger.Debug("The library still holds another record titled '{0}'; not carrying the deletion", pair.Value.Title);
+                    continue;
+                }
+
                 // Refreshes replace book rows constantly; the remembered title and author
                 // are enough for the mirror lookup even when the row is gone.
                 Book deletedBook = null;
