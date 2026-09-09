@@ -208,21 +208,32 @@ namespace NzbDrone.Core.Notifications.Grimmory
                 }
 
                 var metadata = BuildMetadata(book, author, edition, fields);
+                var coverPath = fields.Contains("cover", StringComparer.OrdinalIgnoreCase) ? GetCoverPath(book, edition) : null;
+
+                // Grimmory rejects a cover upload outright once the cover is locked, where it
+                // skips a locked metadata field silently.
+                var pushCover = coverPath != null && grimmoryBook.Metadata?.CoverLocked != true;
+
+                if (metadata.Any() || pushCover)
+                {
+                    // Grimmory writes the sidecar during these calls, so the entry has to exist
+                    // before the first of them.
+                    GrimmoryPushRegistry.RecordPush(book.Id);
+                }
+
+                if (pushCover)
+                {
+                    _proxy.UploadBookCover(settings, grimmoryBook.Id, File.ReadAllBytes(coverPath), Path.GetFileName(coverPath));
+
+                    // Locked only once the upload has landed, for the same reason.
+                    metadata["coverLocked"] = true;
+                }
 
                 if (metadata.Any())
                 {
-                    // Only a metadata update makes Grimmory rewrite the sidecar, and it writes
-                    // it during the call, so the entry has to exist before the call.
-                    GrimmoryPushRegistry.RecordPush(book.Id);
-
                     // Grimmory skips locked fields even for the writer that locked them, so a
                     // re-push only lands on fields someone has unlocked there.
                     _proxy.UpdateBookMetadata(settings, grimmoryBook.Id, metadata);
-                }
-
-                if (fields.Contains("cover", StringComparer.OrdinalIgnoreCase))
-                {
-                    PushCover(settings, grimmoryBook.Id, book, edition);
                 }
 
                 _logger.Debug("Pushed '{0}' to Grimmory book {1} on {2}", book.Title, grimmoryBook.Id, settings.Url);
@@ -350,6 +361,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
             if (wanted.Contains("authors") && author?.Name.IsNotNullOrWhiteSpace() == true)
             {
                 metadata["authors"] = new List<string> { author.Name };
+                metadata["authorsLocked"] = true;
             }
 
             if (wanted.Contains("series"))
@@ -372,6 +384,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
             if (wanted.Contains("tags") && book.Genres?.Any() == true)
             {
                 metadata["categories"] = book.Genres;
+                metadata["categoriesLocked"] = true;
             }
 
             if (wanted.Contains("identifiers"))
@@ -486,19 +499,6 @@ namespace NzbDrone.Core.Notifications.Grimmory
             }
 
             return payload;
-        }
-
-        private void PushCover(GrimmorySettings settings, long grimmoryBookId, Book book, Edition edition)
-        {
-            var coverPath = GetCoverPath(book, edition);
-
-            if (coverPath == null)
-            {
-                _logger.Debug("No cover file on disk for '{0}'; skipping cover push", book.Title);
-                return;
-            }
-
-            _proxy.UploadBookCover(settings, grimmoryBookId, File.ReadAllBytes(coverPath), Path.GetFileName(coverPath));
         }
 
         private string GetCoverPath(Book book, Edition edition)

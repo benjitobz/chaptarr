@@ -223,7 +223,7 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             context.Service.Execute(new PushGrimmoryMetadataCommand
             {
                 BookIds = new List<int> { 10 },
-                Fields = new List<string> { "title", "description", "authors", "identifiers" }
+                Fields = new List<string> { "title", "description", "authors", "identifiers", "tags" }
             });
 
             Assert.That(context.Proxy.MetadataUpdates, Has.Count.EqualTo(1));
@@ -237,6 +237,9 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
                 Assert.That(metadata["titleLocked"], Is.True);
                 Assert.That(metadata["description"], Is.EqualTo("Edition overview."));
                 Assert.That(metadata["authors"], Is.EqualTo(new List<string> { "Robin Hobb" }));
+                Assert.That(metadata["authorsLocked"], Is.True);
+                Assert.That(metadata["categories"], Is.EqualTo(new List<string> { "fantasy" }));
+                Assert.That(metadata["categoriesLocked"], Is.True);
                 Assert.That(metadata["isbn13"], Is.EqualTo("9780007562252"));
                 Assert.That(metadata["isbn13Locked"], Is.True);
                 Assert.That(metadata.ContainsKey("publisher"), Is.False);
@@ -260,7 +263,7 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
         }
 
         [Test]
-        public void should_not_record_cover_only_push_in_registry()
+        public void should_not_record_push_in_registry_when_nothing_was_sent()
         {
             var context = CreateContext();
             context.Proxy.BooksByPath["Robin Hobb/Assassin's Apprentice/Assassin's Apprentice.epub"] = GrimmoryBookAt("Robin Hobb/Assassin's Apprentice/Assassin's Apprentice.epub");
@@ -272,6 +275,34 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             });
 
             Assert.That(GrimmoryPushRegistry.WasRecentlyPushed(10), Is.False);
+        }
+
+        [Test]
+        public void should_leave_a_locked_cover_alone()
+        {
+            var coverFile = Path.GetTempFileName();
+            File.WriteAllBytes(coverFile, new byte[] { 1, 2, 3 });
+
+            try
+            {
+                var context = CreateContext(coverPath: coverFile);
+                var grimmoryBook = GrimmoryBookAt("Robin Hobb/Assassin's Apprentice/Assassin's Apprentice.epub");
+                grimmoryBook.Metadata = new GrimmoryBookMetadata { CoverLocked = true };
+                context.Proxy.BooksByPath["Robin Hobb/Assassin's Apprentice/Assassin's Apprentice.epub"] = grimmoryBook;
+
+                context.Service.Execute(new PushGrimmoryMetadataCommand
+                {
+                    BookIds = new List<int> { 10 },
+                    Fields = new List<string> { "cover" }
+                });
+
+                Assert.That(context.Proxy.CoverUploads, Is.Empty);
+                Assert.That(context.Proxy.MetadataUpdates, Is.Empty);
+            }
+            finally
+            {
+                File.Delete(coverFile);
+            }
         }
 
         [Test]
@@ -356,7 +387,8 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
                 });
 
                 Assert.That(context.Proxy.CoverUploads, Has.Count.EqualTo(1));
-                Assert.That(context.Proxy.MetadataUpdates, Is.Empty);
+                Assert.That(context.Proxy.MetadataUpdates, Has.Count.EqualTo(1));
+                Assert.That(context.Proxy.MetadataUpdates[0].Metadata.Keys, Is.EqualTo(new[] { "coverLocked" }));
             }
             finally
             {
