@@ -72,12 +72,32 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             public ValidationFailure Test(GrimmorySettings settings) => null;
         }
 
+        private class TestEditTarget : NotificationBase<GrimmorySettings>, IExternalLibraryEditTarget
+        {
+            public List<(Book Book, ExternalLibraryEditPayload Payload)> Pushes { get; } = new List<(Book, ExternalLibraryEditPayload)>();
+
+            public override string Name => "TestTarget";
+            public override string Link => string.Empty;
+            public bool AcceptsExternalLibraryEdits => true;
+
+            public void PushExternalLibraryEdit(Book book, List<BookFile> files, ExternalLibraryEditPayload payload)
+            {
+                Pushes.Add((book, payload));
+            }
+
+            public override ValidationResult Test()
+            {
+                return new ValidationResult();
+            }
+        }
+
         private class Context
         {
             public FakeGrimmoryProxy Proxy;
             public GrimmoryPushService Service;
             public List<Command> PushedCommands = new List<Command>();
             public GrimmorySettings Settings;
+            public TestEditTarget Target;
         }
 
         private static Context CreateContext(bool pushMetadata = true, bool pushCovers = true, string coverPath = null)
@@ -110,8 +130,13 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
                 Definition = new NotificationDefinition { Id = 1, Name = "Grimmory", Settings = settings }
             };
 
+            context.Target = new TestEditTarget
+            {
+                Definition = new NotificationDefinition { Id = 2, Name = "TestTarget", Settings = new GrimmorySettings() }
+            };
+
             var factory = Stub<INotificationFactory>(out var factoryStub);
-            factoryStub.Handlers["GetAvailableProviders"] = _ => new List<INotification> { provider };
+            factoryStub.Handlers["GetAvailableProviders"] = _ => new List<INotification> { provider, context.Target };
 
             var book = new Book
             {
@@ -247,6 +272,56 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             });
 
             Assert.That(GrimmoryPushRegistry.WasRecentlyPushed(10), Is.False);
+        }
+
+        [Test]
+        public void should_mirror_push_to_other_edit_targets()
+        {
+            var coverFile = Path.GetTempFileName();
+            File.WriteAllBytes(coverFile, new byte[] { 1, 2, 3 });
+
+            try
+            {
+                var context = CreateContext(coverPath: coverFile);
+                context.Proxy.BooksByPath["Robin Hobb/Assassin's Apprentice/Assassin's Apprentice.epub"] = GrimmoryBookAt("Robin Hobb/Assassin's Apprentice/Assassin's Apprentice.epub");
+
+                context.Service.Execute(new PushGrimmoryMetadataCommand
+                {
+                    BookIds = new List<int> { 10 },
+                    Fields = new List<string> { "description", "publisher", "tags", "cover" }
+                });
+
+                Assert.That(context.Target.Pushes, Has.Count.EqualTo(1));
+
+                var payload = context.Target.Pushes[0].Payload;
+
+                Assert.Multiple(() =>
+                {
+                    Assert.That(payload.Description, Is.EqualTo("Edition overview."));
+                    Assert.That(payload.Publisher, Is.EqualTo("Voyager"));
+                    Assert.That(payload.Genres, Is.EqualTo(new List<string> { "fantasy" }));
+                    Assert.That(payload.CoverBytes, Is.EqualTo(new byte[] { 1, 2, 3 }));
+                    Assert.That(payload.Title, Is.Null);
+                });
+            }
+            finally
+            {
+                File.Delete(coverFile);
+            }
+        }
+
+        [Test]
+        public void should_not_mirror_push_when_nothing_was_pushed_to_grimmory()
+        {
+            var context = CreateContext();
+
+            context.Service.Execute(new PushGrimmoryMetadataCommand
+            {
+                BookIds = new List<int> { 10 },
+                Fields = new List<string> { "title" }
+            });
+
+            Assert.That(context.Target.Pushes, Is.Empty);
         }
 
         [Test]

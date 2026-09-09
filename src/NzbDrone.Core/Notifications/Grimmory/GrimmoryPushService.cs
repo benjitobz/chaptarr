@@ -229,7 +229,45 @@ namespace NzbDrone.Core.Notifications.Grimmory
                 anyPushed = true;
             }
 
+            if (anyPushed)
+            {
+                PushToOtherTargets(book, files, edition, fields, connections);
+            }
+
             return anyPushed;
+        }
+
+        // Grimmory rewrites its sidecar in response to this push and the forwarder drops that
+        // event as an echo, so the other connections have to be told here or they keep showing
+        // the pre-push values.
+        private void PushToOtherTargets(Book book, List<BookFile> files, Edition edition, List<string> fields, List<Grimmory> connections)
+        {
+            var alreadyPushed = new HashSet<int>(connections.Select(c => c.Definition.Id));
+
+            var targets = _notificationFactory.GetAvailableProviders()
+                .OfType<IExternalLibraryEditTarget>()
+                .Where(t => t.AcceptsExternalLibraryEdits && !alreadyPushed.Contains(t.Definition.Id))
+                .ToList();
+
+            if (targets.Empty())
+            {
+                return;
+            }
+
+            var payload = BuildEditPayload(book, edition, fields);
+
+            foreach (var target in targets)
+            {
+                try
+                {
+                    target.PushExternalLibraryEdit(book, files, payload);
+                    _logger.Debug("Mirrored the push of '{0}' to {1}", book.Title, target.Definition.Name);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn(ex, "Failed to mirror the push of '{0}' to {1}", book.Title, target.Definition.Name);
+                }
+            }
         }
 
         private GrimmoryBook FindGrimmoryBook(GrimmorySettings settings, long libraryId, List<BookFile> files, bool waitForBook)
@@ -360,25 +398,121 @@ namespace NzbDrone.Core.Notifications.Grimmory
             return metadata;
         }
 
+        private ExternalLibraryEditPayload BuildEditPayload(Book book, Edition edition, List<string> fields)
+        {
+            var wanted = new HashSet<string>(fields, StringComparer.OrdinalIgnoreCase);
+            var payload = new ExternalLibraryEditPayload();
+
+            if (wanted.Contains("title"))
+            {
+                payload.Title = edition?.Title ?? book.Title;
+            }
+
+            if (wanted.Contains("description"))
+            {
+                payload.Description = edition?.Overview ?? book.Overview;
+            }
+
+            if (wanted.Contains("publisher"))
+            {
+                payload.Publisher = edition?.Publisher;
+            }
+
+            if (wanted.Contains("language") && edition?.Language.IsNotNullOrWhiteSpace() == true)
+            {
+                payload.Languages = new List<string> { edition.Language };
+            }
+
+            var releaseDate = edition?.ReleaseDate ?? book.ReleaseDate;
+
+            if (wanted.Contains("publisheddate") && releaseDate.HasValue && releaseDate.Value > DateTime.MinValue)
+            {
+                payload.PublishedDate = releaseDate;
+            }
+
+            if (wanted.Contains("series"))
+            {
+                var seriesLink = book.SeriesLinks?.FirstOrDefault(l => l?.Series?.Value?.Title.IsNotNullOrWhiteSpace() == true);
+
+                if (seriesLink != null)
+                {
+                    payload.SeriesName = seriesLink.Series.Value.Title;
+
+                    if (double.TryParse(seriesLink.Position, out var position))
+                    {
+                        payload.SeriesPosition = position;
+                    }
+                }
+            }
+
+            if (wanted.Contains("tags") && book.Genres?.Any() == true)
+            {
+                payload.Genres = book.Genres;
+            }
+
+            if (wanted.Contains("identifiers"))
+            {
+                var identifiers = new Dictionary<string, string>();
+
+                if (edition?.Isbn13.IsNotNullOrWhiteSpace() == true)
+                {
+                    identifiers["isbn"] = edition.Isbn13;
+                }
+
+                if (edition?.Asin.IsNotNullOrWhiteSpace() == true)
+                {
+                    identifiers["asin"] = edition.Asin;
+                }
+
+                if (edition?.ForeignEditionId.IsNotNullOrWhiteSpace() == true)
+                {
+                    identifiers["goodreads"] = edition.ForeignEditionId;
+                }
+
+                if (identifiers.Any())
+                {
+                    payload.Identifiers = identifiers;
+                }
+            }
+
+            if (wanted.Contains("cover"))
+            {
+                var coverPath = GetCoverPath(book, edition);
+
+                if (coverPath != null)
+                {
+                    payload.CoverBytes = File.ReadAllBytes(coverPath);
+                }
+            }
+
+            return payload;
+        }
+
         private void PushCover(GrimmorySettings settings, long grimmoryBookId, Book book, Edition edition)
+        {
+            var coverPath = GetCoverPath(book, edition);
+
+            if (coverPath == null)
+            {
+                _logger.Debug("No cover file on disk for '{0}'; skipping cover push", book.Title);
+                return;
+            }
+
+            _proxy.UploadBookCover(settings, grimmoryBookId, File.ReadAllBytes(coverPath), Path.GetFileName(coverPath));
+        }
+
+        private string GetCoverPath(Book book, Edition edition)
         {
             var cover = (edition?.Images ?? book.Images)?.FirstOrDefault(i => i.CoverType == MediaCoverTypes.Cover);
 
             if (cover == null)
             {
-                _logger.Debug("No cover known for '{0}'; skipping cover push", book.Title);
-                return;
+                return null;
             }
 
-            var coverPath = _coverMapper.GetCoverPath(book.Id, MediaCoverEntity.Book, cover.CoverType, cover.Extension);
+            var path = _coverMapper.GetCoverPath(book.Id, MediaCoverEntity.Book, cover.CoverType, cover.Extension);
 
-            if (coverPath.IsNullOrWhiteSpace() || !File.Exists(coverPath))
-            {
-                _logger.Debug("Cover file for '{0}' not present at {1}; skipping cover push", book.Title, coverPath);
-                return;
-            }
-
-            _proxy.UploadBookCover(settings, grimmoryBookId, File.ReadAllBytes(coverPath), Path.GetFileName(coverPath));
+            return path.IsNotNullOrWhiteSpace() && File.Exists(path) ? path : null;
         }
     }
 }
