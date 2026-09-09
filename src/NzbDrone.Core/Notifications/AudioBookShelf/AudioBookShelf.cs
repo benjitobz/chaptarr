@@ -24,7 +24,7 @@ using NzbDrone.Core.ThingiProvider;
 
 namespace NzbDrone.Core.Notifications.AudioBookShelf
 {
-    public class AudioBookShelf : NotificationBase<AudioBookShelfSettings>, IResolveProviderPendingSecrets
+    public class AudioBookShelf : NotificationBase<AudioBookShelfSettings>, IResolveProviderPendingSecrets, IExternalLibraryEditTarget
     {
         private readonly IAudioBookShelfProxy _proxy;
         private readonly IHttpClient _httpClient;
@@ -298,6 +298,87 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 SeriesPosition = book.SeriesPosition,
                 Genres = book.Genres ?? new List<string>()
             };
+        }
+
+        public bool AcceptsExternalLibraryEdits => Settings.PushLibraryEdits;
+
+        // Applies an edit made in another library service (e.g. Grimmory) to the matching
+        // items. Title stays Chaptarr's, mirroring the calibre forwarder's identity rule.
+        public void PushExternalLibraryEdit(Book book, List<BookFile> files, ExternalLibraryEditPayload payload)
+        {
+            if (book == null || payload == null || files == null || files.Count == 0)
+            {
+                return;
+            }
+
+            var mappings = Settings.GetLibraryMappings();
+
+            if (mappings.Count == 0)
+            {
+                return;
+            }
+
+            var metadata = new AudioBookShelfItemMetadata
+            {
+                Title = book.Title,
+                Description = payload.Description,
+                Publisher = payload.Publisher,
+                SeriesName = payload.SeriesName,
+                SeriesPosition = payload.SeriesPosition?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
+                Genres = payload.Genres
+            };
+
+            foreach (var libraryId in MappedLibraryIds(mappings))
+            {
+                List<AudioBookShelfLibraryItemSummary> items;
+
+                try
+                {
+                    items = _proxy.GetLibraryItems(Settings, libraryId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug(ex, "AudioBookShelf: unable to list items for library '{0}'", libraryId);
+                    continue;
+                }
+
+                foreach (var folder in DistinctFolders(files))
+                {
+                    var resolved = ResolveLibraryRelativePath(folder);
+
+                    if (resolved == null)
+                    {
+                        continue;
+                    }
+
+                    var item = items.FirstOrDefault(i => string.Equals(i.RelPath, resolved.Value.RelativePath, StringComparison.OrdinalIgnoreCase));
+
+                    if (item == null)
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        _proxy.UpdateItemMetadata(Settings, item.Id, metadata);
+
+                        if (payload.CoverBytes?.Length > 0)
+                        {
+                            _proxy.UploadItemCover(Settings, item.Id, payload.CoverBytes, "cover.jpg");
+                        }
+                        else if (payload.CoverUrl.IsNotNullOrWhiteSpace())
+                        {
+                            _proxy.UpdateItemCover(Settings, item.Id, payload.CoverUrl);
+                        }
+
+                        _logger.Debug("AudioBookShelf: forwarded external edit for '{0}'", resolved.Value.RelativePath);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Debug(ex, "AudioBookShelf: external edit push failed for '{0}'", resolved.Value.RelativePath);
+                    }
+                }
+            }
         }
 
         public void PushBooksMetadata(List<(Book Book, List<BookFile> Files)> books)

@@ -18,6 +18,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
         void ScanItem(AudioBookShelfSettings settings, string itemId);
         void UpdateItemMetadata(AudioBookShelfSettings settings, string itemId, AudioBookShelfItemMetadata metadata);
         void UpdateItemCover(AudioBookShelfSettings settings, string itemId, string coverPath);
+        void UploadItemCover(AudioBookShelfSettings settings, string itemId, byte[] image, string fileName);
         void UpdateWatchedPath(AudioBookShelfSettings settings, string libraryId, string path, string type, string oldPath = null);
         ValidationFailure Test(AudioBookShelfSettings settings);
         List<AudioBookShelfLibrary> GetLibraries(AudioBookShelfSettings settings);
@@ -322,6 +323,42 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
         private class AudioBookShelfLibraryItemsResponse
         {
             public List<AudioBookShelfLibraryItemSummary> Results { get; set; }
+        }
+
+        // For covers a target cannot fetch itself (e.g. behind another service's auth) the
+        // image bytes are uploaded directly instead of handing AudioBookShelf a URL to pull.
+        public void UploadItemCover(AudioBookShelfSettings settings, string itemId, byte[] image, string fileName)
+        {
+            if (string.IsNullOrEmpty(itemId) || image == null || image.Length == 0)
+            {
+                return;
+            }
+
+            var extension = System.IO.Path.GetExtension(fileName)?.ToLowerInvariant();
+            var contentType = extension switch
+            {
+                ".png" => "image/png",
+                ".webp" => "image/webp",
+                _ => "image/jpeg"
+            };
+
+            var baseUrl = HttpRequestBuilder.BuildBaseUrl(settings.UseSsl, settings.Host.ToUrlHost(), settings.Port, settings.UrlBase);
+            var request = new HttpRequestBuilder(baseUrl)
+                .Resource($"/api/items/{itemId}/cover")
+                .Post()
+                .AddFormUpload("cover", fileName, image, contentType)
+                .Build();
+
+            request.RequestTimeout = RequestTimeout;
+            request.Headers.Add("User-Agent", "Chaptarr");
+            request.Headers.Add("Authorization", $"Bearer {settings.ApiKey}");
+
+            var response = _httpClient.Execute(request);
+
+            if (response.HasHttpError)
+            {
+                throw new HttpException(response);
+            }
         }
 
         private HttpRequest BuildRequest(AudioBookShelfSettings settings, string resource)
