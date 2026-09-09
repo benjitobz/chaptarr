@@ -265,6 +265,27 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
         }
 
         [Test]
+        public void should_forward_edit_made_after_push_echo_was_consumed()
+        {
+            var context = CreateContext();
+            context.Proxy.BooksByPath[RelativePath] = BuildGrimmoryBook();
+
+            GrimmoryPushRegistry.RecordPush(10);
+
+            // Grimmory rewriting the sidecar in response to Chaptarr's own push - suppressed.
+            context.Forwarder.QueueSidecar(context.SidecarPath);
+            context.Forwarder.ForwardPending();
+            Assert.That(context.Target.Pushes, Is.Empty);
+
+            // A person's edit right after - the push entry is spent, so this forwards.
+            context.Forwarder.QueueSidecar(context.SidecarPath);
+            context.Forwarder.ForwardPending();
+            Assert.That(context.Target.Pushes, Has.Count.EqualTo(1));
+
+            context.Forwarder.Dispose();
+        }
+
+        [Test]
         public void should_ignore_sidecar_without_matching_book_file()
         {
             var context = CreateContext();

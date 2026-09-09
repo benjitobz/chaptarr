@@ -237,7 +237,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
                 return;
             }
 
-            if (GrimmoryPushRegistry.WasRecentlyPushed(book.Id))
+            if (GrimmoryPushRegistry.TryConsumeRecentPush(book.Id))
             {
                 _logger.Debug("Sidecar change for '{0}' follows Chaptarr's own push; not forwarding back out", book.Title);
                 return;

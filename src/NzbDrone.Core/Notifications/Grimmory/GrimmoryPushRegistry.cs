@@ -20,14 +20,29 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
         public static bool WasRecentlyPushed(int bookId)
         {
+            Sweep();
+
+            return RecentPushes.TryGetValue(bookId, out var pushed) && DateTime.UtcNow - pushed <= Window;
+        }
+
+        // One-shot: a push causes exactly one sidecar rewrite in Grimmory, so the first
+        // matching sidecar event consumes the entry. A person's edit made shortly after a
+        // push is then still forwarded instead of being discarded as an echo.
+        public static bool TryConsumeRecentPush(int bookId)
+        {
+            Sweep();
+
+            return RecentPushes.TryRemove(bookId, out var pushed) && DateTime.UtcNow - pushed <= Window;
+        }
+
+        private static void Sweep()
+        {
             var now = DateTime.UtcNow;
 
             foreach (var stale in RecentPushes.Where(p => now - p.Value > Window).Select(p => p.Key).ToList())
             {
                 RecentPushes.TryRemove(stale, out _);
             }
-
-            return RecentPushes.TryGetValue(bookId, out var pushed) && now - pushed <= Window;
         }
 
         public static void Clear()
