@@ -11,7 +11,12 @@ namespace NzbDrone.Core.Notifications.Grimmory
     public static class GrimmoryPushRegistry
     {
         private static readonly ConcurrentDictionary<int, DateTime> RecentPushes = new ConcurrentDictionary<int, DateTime>();
+        private static readonly ConcurrentDictionary<int, DateTime> ConsumedEchoes = new ConcurrentDictionary<int, DateTime>();
         private static readonly TimeSpan Window = TimeSpan.FromMinutes(10);
+
+        // The filesystem raises several events for one sidecar write, so the echo of a push is
+        // absorbed for this long after it is first consumed. Settable so tests need not wait.
+        public static TimeSpan EchoShadow { get; set; } = TimeSpan.FromSeconds(15);
 
         public static void RecordPush(int bookId)
         {
@@ -25,14 +30,29 @@ namespace NzbDrone.Core.Notifications.Grimmory
             return RecentPushes.TryGetValue(bookId, out var pushed) && DateTime.UtcNow - pushed <= Window;
         }
 
-        // One-shot: a push causes exactly one sidecar rewrite in Grimmory, so the first
-        // matching sidecar event consumes the entry. A person's edit made shortly after a
-        // push is then still forwarded instead of being discarded as an echo.
-        public static bool TryConsumeRecentPush(int bookId)
+        // Decided per filesystem event, at arrival: the first sidecar event after a push is
+        // its echo (Grimmory rewrites the sidecar in response to the push) and consumes the
+        // entry; further events inside the shadow are duplicate notifications for that same
+        // write. Anything later is a real edit and must be forwarded - deciding per batch
+        // instead would let an echo and a genuine edit coalesce and be discarded together.
+        public static bool ShouldSuppressSidecarEvent(int bookId)
         {
             Sweep();
 
-            return RecentPushes.TryRemove(bookId, out var pushed) && DateTime.UtcNow - pushed <= Window;
+            var now = DateTime.UtcNow;
+
+            if (ConsumedEchoes.TryGetValue(bookId, out var consumedAt) && now - consumedAt <= EchoShadow)
+            {
+                return true;
+            }
+
+            if (RecentPushes.TryRemove(bookId, out var pushed) && now - pushed <= Window)
+            {
+                ConsumedEchoes[bookId] = now;
+                return true;
+            }
+
+            return false;
         }
 
         private static void Sweep()
@@ -43,11 +63,17 @@ namespace NzbDrone.Core.Notifications.Grimmory
             {
                 RecentPushes.TryRemove(stale, out _);
             }
+
+            foreach (var stale in ConsumedEchoes.Where(p => now - p.Value > EchoShadow).Select(p => p.Key).ToList())
+            {
+                ConsumedEchoes.TryRemove(stale, out _);
+            }
         }
 
         public static void Clear()
         {
             RecentPushes.Clear();
+            ConsumedEchoes.Clear();
         }
     }
 }

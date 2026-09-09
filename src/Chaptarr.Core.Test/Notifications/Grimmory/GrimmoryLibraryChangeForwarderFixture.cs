@@ -26,6 +26,13 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
         public void Setup()
         {
             GrimmoryPushRegistry.Clear();
+            GrimmoryPushRegistry.EchoShadow = TimeSpan.Zero;
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            GrimmoryPushRegistry.EchoShadow = TimeSpan.FromSeconds(15);
         }
 
         public class StubProxy : DispatchProxy
@@ -280,6 +287,25 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             // A person's edit right after - the push entry is spent, so this forwards.
             context.Forwarder.QueueSidecar(context.SidecarPath);
             context.Forwarder.ForwardPending();
+            Assert.That(context.Target.Pushes, Has.Count.EqualTo(1));
+
+            context.Forwarder.Dispose();
+        }
+
+        [Test]
+        public void should_forward_edit_coalesced_into_the_same_batch_as_a_push_echo()
+        {
+            var context = CreateContext();
+            context.Proxy.BooksByPath[RelativePath] = BuildGrimmoryBook();
+
+            GrimmoryPushRegistry.RecordPush(10);
+
+            // The push's echo and a person's edit land inside one debounce window: the echo
+            // is dropped at arrival, so the edit still comes out of the shared batch.
+            context.Forwarder.QueueSidecar(context.SidecarPath);
+            context.Forwarder.QueueSidecar(context.SidecarPath);
+            context.Forwarder.ForwardPending();
+
             Assert.That(context.Target.Pushes, Has.Count.EqualTo(1));
 
             context.Forwarder.Dispose();

@@ -179,6 +179,23 @@ namespace NzbDrone.Core.Notifications.Grimmory
                 return;
             }
 
+            try
+            {
+                var bookFile = ResolveSidecarBookFile(path);
+                var edition = bookFile == null ? null : _editionService.GetEdition(bookFile.EditionId);
+                var book = edition == null ? null : _bookService.GetBook(edition.BookId);
+
+                if (book != null && GrimmoryPushRegistry.ShouldSuppressSidecarEvent(book.Id))
+                {
+                    _logger.Debug("Sidecar change for '{0}' follows Chaptarr's own push; not forwarding back out", book.Title);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "Unable to check sidecar {0} for push echo; queueing it", path);
+            }
+
             _pendingSidecars[path] = 1;
             _debounce.Stop();
             _debounce.Start();
@@ -234,12 +251,6 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
             if (book == null || !forwardedBooks.Add(book.Id))
             {
-                return;
-            }
-
-            if (GrimmoryPushRegistry.TryConsumeRecentPush(book.Id))
-            {
-                _logger.Debug("Sidecar change for '{0}' follows Chaptarr's own push; not forwarding back out", book.Title);
                 return;
             }
 
