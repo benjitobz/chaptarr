@@ -19,7 +19,7 @@ using NzbDrone.Core.RootFolders;
 
 namespace NzbDrone.Core.Notifications.CalibreContentServer
 {
-    public class CalibreContentServer : NotificationBase<CalibreContentServerSettings>
+    public class CalibreContentServer : NotificationBase<CalibreContentServerSettings>, IExternalLibraryEditTarget
     {
         private static readonly ConcurrentDictionary<string, DateTime> RecentlyPushedPaths = new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, (int MirrorId, DateTime Added)> RecentlyAddedMirrorIds = new ConcurrentDictionary<string, (int MirrorId, DateTime Added)>(StringComparer.OrdinalIgnoreCase);
@@ -138,6 +138,99 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
             }
 
             PushFile(0, book, bookFile.Path);
+        }
+
+        public bool AcceptsExternalLibraryEdits => Settings.PushLibraryEdits;
+
+        // Applies an edit made in another library service (e.g. Grimmory) to the mirror
+        // record. Title and authors stay Chaptarr's - only the descriptive fields mirror the
+        // editing library, matching the calibre forwarder's identity rule. The changes dict is
+        // built by hand so absent fields are omitted rather than erased on the mirror.
+        public void PushExternalLibraryEdit(Book book, List<NzbDrone.Core.MediaFiles.BookFile> files, ExternalLibraryEditPayload payload)
+        {
+            if (book == null || payload == null)
+            {
+                return;
+            }
+
+            var mirrorId = RecentlyAddedMirrorId(book);
+
+            if (mirrorId == 0)
+            {
+                mirrorId = FindMirrorBookIds(book).Select(int.Parse).FirstOrDefault();
+            }
+
+            if (mirrorId == 0)
+            {
+                _logger.Debug("No content server record matches '{0}'; skipping external edit", book?.Title);
+                return;
+            }
+
+            var changes = new Dictionary<string, object>();
+
+            if (payload.Description.IsNotNullOrWhiteSpace())
+            {
+                changes["comments"] = payload.Description;
+            }
+
+            if (payload.Publisher.IsNotNullOrWhiteSpace())
+            {
+                changes["publisher"] = payload.Publisher;
+            }
+
+            if (payload.PublishedDate.HasValue)
+            {
+                changes["pubdate"] = payload.PublishedDate.Value;
+            }
+
+            if (payload.Languages?.Any() == true)
+            {
+                changes["languages"] = payload.Languages;
+            }
+
+            if (payload.Genres?.Any() == true)
+            {
+                changes["tags"] = payload.Genres;
+            }
+
+            if (payload.SeriesName.IsNotNullOrWhiteSpace())
+            {
+                changes["series"] = payload.SeriesName;
+
+                if (payload.SeriesPosition.HasValue)
+                {
+                    changes["series_index"] = payload.SeriesPosition.Value;
+                }
+            }
+
+            if (payload.Identifiers?.Any() == true)
+            {
+                changes["identifiers"] = payload.Identifiers;
+            }
+
+            if (payload.CoverBytes?.Length > 0 && CalibreImageValidator.IsValidImage(payload.CoverBytes))
+            {
+                changes["cover"] = Convert.ToBase64String(payload.CoverBytes);
+            }
+
+            if (!changes.Any())
+            {
+                return;
+            }
+
+            var body = new Dictionary<string, object>
+            {
+                { "changes", changes },
+                { "loaded_book_ids", new List<int> { mirrorId } }
+            };
+
+            var request = BuildRequest($"cdb/set-fields/{mirrorId}")
+                .SetHeader("Content-Type", "application/json")
+                .Build();
+            request.SetContent(body.ToJson());
+            _httpClient.Post(request);
+
+            _logger.Debug("Forwarded external library edit of '{0}' to content server book {1}", book.Title, mirrorId);
         }
 
         public bool RePush(Book book, List<NzbDrone.Core.MediaFiles.BookFile> files, bool metadataOnly = false)
