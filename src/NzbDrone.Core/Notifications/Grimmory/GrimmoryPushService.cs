@@ -221,6 +221,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
                 _logger.Debug("Pushed '{0}' to Grimmory book {1} on {2}", book.Title, grimmoryBook.Id, settings.Url);
                 anyPushed = true;
+                GrimmoryPushRegistry.RecordPush(book.Id);
             }
 
             return anyPushed;

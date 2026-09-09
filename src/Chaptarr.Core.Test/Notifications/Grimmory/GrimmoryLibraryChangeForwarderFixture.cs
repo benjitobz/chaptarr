@@ -8,7 +8,6 @@ using NLog;
 using NUnit.Framework;
 using NzbDrone.Common.Cache;
 using NzbDrone.Core.Books;
-using NzbDrone.Core.Lifecycle;
 using NzbDrone.Core.MediaFiles;
 using NzbDrone.Core.Messaging.Commands;
 using NzbDrone.Core.Notifications;
@@ -22,6 +21,12 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
     {
         private const long EbookLibraryId = 3;
         private const string RelativePath = "Robin Hobb/Assassin's Apprentice/Assassin's Apprentice.epub";
+
+        [SetUp]
+        public void Setup()
+        {
+            GrimmoryPushRegistry.Clear();
+        }
 
         public class StubProxy : DispatchProxy
         {
@@ -47,23 +52,21 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
 
         private class ScriptedGrimmoryProxy : IGrimmoryProxy
         {
-            public Dictionary<long, List<GrimmoryBook>> BooksByLibrary { get; } = new Dictionary<long, List<GrimmoryBook>>();
-            public List<GrimmoryAuditEntry> AuditEntries { get; } = new List<GrimmoryAuditEntry>();
+            public Dictionary<string, GrimmoryBook> BooksByPath { get; } = new Dictionary<string, GrimmoryBook>(StringComparer.OrdinalIgnoreCase);
 
             public List<GrimmoryLibrary> GetLibraries(GrimmorySettings settings) => new List<GrimmoryLibrary>();
             public void RefreshLibrary(GrimmorySettings settings, long libraryId) { }
+            public List<GrimmoryBook> GetLibraryBooks(GrimmorySettings settings, long libraryId, bool bypassCache = false) => BooksByPath.Values.ToList();
 
-            public List<GrimmoryBook> GetLibraryBooks(GrimmorySettings settings, long libraryId, bool bypassCache = false)
+            public GrimmoryBook FindBookByPath(GrimmorySettings settings, long libraryId, string relativePath, bool bypassCache = false)
             {
-                return BooksByLibrary.TryGetValue(libraryId, out var books) ? books : new List<GrimmoryBook>();
+                return BooksByPath.TryGetValue(relativePath.Replace('\\', '/'), out var book) ? book : null;
             }
 
-            public GrimmoryBook FindBookByPath(GrimmorySettings settings, long libraryId, string relativePath, bool bypassCache = false) => null;
             public void UpdateBookMetadata(GrimmorySettings settings, long bookId, Dictionary<string, object> metadata) { }
             public void UploadBookCover(GrimmorySettings settings, long bookId, byte[] image, string fileName) { }
             public byte[] GetBookCover(GrimmorySettings settings, long bookId) => new byte[] { 9 };
             public string BuildCoverUrl(GrimmorySettings settings, long bookId) => $"http://grimmory/cover/{bookId}";
-            public List<GrimmoryAuditEntry> GetMetadataAuditEntries(GrimmorySettings settings, DateTime fromUtc) => AuditEntries.ToList();
             public ValidationFailure Test(GrimmorySettings settings) => null;
         }
 
@@ -91,10 +94,11 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             public ScriptedGrimmoryProxy Proxy;
             public GrimmoryLibraryChangeForwarder Forwarder;
             public TestEditTarget Target;
-            public GrimmorySettings Settings;
+            public string SidecarPath;
+            public string CoverSidecarPath;
         }
 
-        private static GrimmoryBook BuildGrimmoryBook(DateTime? coverUpdatedOn = null)
+        private static GrimmoryBook BuildGrimmoryBook()
         {
             var slash = RelativePath.LastIndexOf('/');
 
@@ -116,8 +120,7 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
                     SeriesNumber = 1,
                     Language = "eng",
                     Isbn13 = "9780007562252",
-                    Categories = new List<string> { "fantasy" },
-                    CoverUpdatedOn = coverUpdatedOn
+                    Categories = new List<string> { "fantasy" }
                 }
             };
         }
@@ -136,7 +139,6 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
                 EbookLibraryId = EbookLibraryId,
                 ForwardEdits = true
             };
-            context.Settings = settings;
 
             var commandQueue = Stub<IManageCommandQueue>(out var commandStub);
             commandStub.Handlers["Push"] = _ => null;
@@ -155,21 +157,29 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             var factory = Stub<INotificationFactory>(out var factoryStub);
             factoryStub.Handlers["GetAvailableProviders"] = _ => new List<INotification> { source, target };
 
-            var rootFolderService = Stub<IRootFolderService>(out var rootStub);
-            rootStub.Handlers["All"] = _ => new List<RootFolder> { new RootFolder { Id = 1, Path = @"C:\books".AsOsAgnostic() } };
+            var rootPath = @"C:\books".AsOsAgnostic();
+            var bookDir = Path.Combine(rootPath, "Robin Hobb", "Assassin's Apprentice");
+            var bookFilePath = Path.Combine(bookDir, "Assassin's Apprentice.epub");
+            context.SidecarPath = Path.Combine(bookDir, "Assassin's Apprentice.metadata.json");
+            context.CoverSidecarPath = Path.Combine(bookDir, "Assassin's Apprentice.cover.jpg");
 
-            var expectedPath = Path.Combine(@"C:\books".AsOsAgnostic(), RelativePath.Replace('/', Path.DirectorySeparatorChar));
-            var bookFile = new BookFile { Id = 40, EditionId = 30, Path = expectedPath, MediaType = "ebook" };
+            var bookFile = new BookFile { Id = 40, EditionId = 30, Path = bookFilePath, MediaType = "ebook" };
+
+            var rootFolderService = Stub<IRootFolderService>(out var rootStub);
+            rootStub.Handlers["All"] = _ => new List<RootFolder> { new RootFolder { Id = 1, Path = rootPath } };
+            rootStub.Handlers["GetBestRootFolder"] = _ => new RootFolder { Id = 1, Path = rootPath };
 
             var mediaFileService = Stub<IMediaFileService>(out var mediaFileStub);
-            mediaFileStub.Handlers["GetFileWithPath"] = args => string.Equals((string)args[0], expectedPath, StringComparison.OrdinalIgnoreCase) ? bookFile : null;
+            mediaFileStub.Handlers["GetFilesWithBasePath"] = args => string.Equals((string)args[0], bookDir, StringComparison.OrdinalIgnoreCase)
+                ? new List<BookFile> { bookFile }
+                : new List<BookFile>();
             mediaFileStub.Handlers["GetFilesByBook"] = _ => new List<BookFile> { bookFile };
 
             var editionService = Stub<IEditionService>(out var editionStub);
             editionStub.Handlers["GetEdition"] = args => (int)args[0] == 30 ? new Edition { Id = 30, BookId = 10 } : null;
 
             var bookService = Stub<IBookService>(out var bookStub);
-            bookStub.Handlers["GetBook"] = args => (int)args[0] == 10 ? new Book { Id = 10, Title = "Assassin's Apprentice" } : null;
+            bookStub.Handlers["GetBook"] = args => (int)args[0] == 10 ? new Book { Id = 10, Title = "Assassin's Apprentice", MediaType = BookMediaType.Ebook } : null;
 
             context.Forwarder = new GrimmoryLibraryChangeForwarder(
                 factory,
@@ -183,41 +193,14 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             return context;
         }
 
-        private static GrimmoryAuditEntry MetadataEditBy(string username)
-        {
-            return new GrimmoryAuditEntry
-            {
-                Id = 1,
-                Username = username,
-                EntityType = "Book",
-                EntityId = 100,
-                CreatedAt = DateTime.UtcNow
-            };
-        }
-
         [Test]
-        public void should_not_forward_anything_on_first_poll()
+        public void should_forward_edit_signalled_by_metadata_sidecar()
         {
             var context = CreateContext();
-            context.Proxy.BooksByLibrary[EbookLibraryId] = new List<GrimmoryBook> { BuildGrimmoryBook() };
-            context.Proxy.AuditEntries.Add(MetadataEditBy("editor"));
+            context.Proxy.BooksByPath[RelativePath] = BuildGrimmoryBook();
 
-            context.Forwarder.Handle(new ApplicationStartedEvent());
-
-            Assert.That(context.Target.Pushes, Is.Empty);
-
-            context.Forwarder.Dispose();
-        }
-
-        [Test]
-        public void should_forward_metadata_edit_by_another_user()
-        {
-            var context = CreateContext();
-            context.Proxy.BooksByLibrary[EbookLibraryId] = new List<GrimmoryBook> { BuildGrimmoryBook() };
-
-            context.Forwarder.Handle(new ApplicationStartedEvent());
-            context.Proxy.AuditEntries.Add(MetadataEditBy("editor"));
-            context.Forwarder.Handle(new ApplicationStartedEvent());
+            context.Forwarder.QueueSidecar(context.SidecarPath);
+            context.Forwarder.ForwardPending();
 
             Assert.That(context.Target.Pushes, Has.Count.EqualTo(1));
 
@@ -237,14 +220,44 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
         }
 
         [Test]
-        public void should_ignore_edits_made_by_the_connections_own_user()
+        public void should_forward_edit_signalled_by_cover_sidecar()
         {
             var context = CreateContext();
-            context.Proxy.BooksByLibrary[EbookLibraryId] = new List<GrimmoryBook> { BuildGrimmoryBook() };
+            context.Proxy.BooksByPath[RelativePath] = BuildGrimmoryBook();
 
-            context.Forwarder.Handle(new ApplicationStartedEvent());
-            context.Proxy.AuditEntries.Add(MetadataEditBy("chaptarr"));
-            context.Forwarder.Handle(new ApplicationStartedEvent());
+            context.Forwarder.QueueSidecar(context.CoverSidecarPath);
+            context.Forwarder.ForwardPending();
+
+            Assert.That(context.Target.Pushes, Has.Count.EqualTo(1));
+
+            context.Forwarder.Dispose();
+        }
+
+        [Test]
+        public void should_dedupe_metadata_and_cover_sidecars_for_same_book()
+        {
+            var context = CreateContext();
+            context.Proxy.BooksByPath[RelativePath] = BuildGrimmoryBook();
+
+            context.Forwarder.QueueSidecar(context.SidecarPath);
+            context.Forwarder.QueueSidecar(context.CoverSidecarPath);
+            context.Forwarder.ForwardPending();
+
+            Assert.That(context.Target.Pushes, Has.Count.EqualTo(1));
+
+            context.Forwarder.Dispose();
+        }
+
+        [Test]
+        public void should_not_forward_sidecar_written_after_chaptarrs_own_push()
+        {
+            var context = CreateContext();
+            context.Proxy.BooksByPath[RelativePath] = BuildGrimmoryBook();
+
+            GrimmoryPushRegistry.RecordPush(10);
+
+            context.Forwarder.QueueSidecar(context.SidecarPath);
+            context.Forwarder.ForwardPending();
 
             Assert.That(context.Target.Pushes, Is.Empty);
 
@@ -252,18 +265,15 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
         }
 
         [Test]
-        public void should_forward_cover_change_detected_from_timestamps()
+        public void should_ignore_sidecar_without_matching_book_file()
         {
             var context = CreateContext();
-            var initial = DateTime.UtcNow.AddHours(-1);
-            context.Proxy.BooksByLibrary[EbookLibraryId] = new List<GrimmoryBook> { BuildGrimmoryBook(initial) };
+            context.Proxy.BooksByPath[RelativePath] = BuildGrimmoryBook();
 
-            context.Forwarder.Handle(new ApplicationStartedEvent());
+            context.Forwarder.QueueSidecar(Path.Combine(@"C:\books".AsOsAgnostic(), "Unknown", "Unknown.metadata.json"));
+            context.Forwarder.ForwardPending();
 
-            context.Proxy.BooksByLibrary[EbookLibraryId] = new List<GrimmoryBook> { BuildGrimmoryBook(DateTime.UtcNow) };
-            context.Forwarder.Handle(new ApplicationStartedEvent());
-
-            Assert.That(context.Target.Pushes, Has.Count.EqualTo(1));
+            Assert.That(context.Target.Pushes, Is.Empty);
 
             context.Forwarder.Dispose();
         }
@@ -272,11 +282,10 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
         public void should_skip_target_sharing_the_sources_definition()
         {
             var context = CreateContext(targetDefinitionId: 1);
-            context.Proxy.BooksByLibrary[EbookLibraryId] = new List<GrimmoryBook> { BuildGrimmoryBook() };
+            context.Proxy.BooksByPath[RelativePath] = BuildGrimmoryBook();
 
-            context.Forwarder.Handle(new ApplicationStartedEvent());
-            context.Proxy.AuditEntries.Add(MetadataEditBy("editor"));
-            context.Forwarder.Handle(new ApplicationStartedEvent());
+            context.Forwarder.QueueSidecar(context.SidecarPath);
+            context.Forwarder.ForwardPending();
 
             Assert.That(context.Target.Pushes, Is.Empty);
 

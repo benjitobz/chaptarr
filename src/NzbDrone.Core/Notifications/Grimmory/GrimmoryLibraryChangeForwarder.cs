@@ -6,22 +6,31 @@ using System.Linq;
 using NLog;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Books;
+using NzbDrone.Core.Datastore.Events;
 using NzbDrone.Core.Lifecycle;
 using NzbDrone.Core.MediaFiles;
 using NzbDrone.Core.Messaging.Events;
 using NzbDrone.Core.RootFolders;
+using NzbDrone.Core.ThingiProvider.Events;
 
 namespace NzbDrone.Core.Notifications.Grimmory
 {
-    // Watches Grimmory for metadata and cover edits and forwards them to connections that
-    // implement IExternalLibraryEditTarget. Grimmory is remote, so unlike the calibre
-    // forwarder there is no filesystem signal to hook - metadata edits are detected through
-    // Grimmory's audit log (filtered by the connection's own username, so Chaptarr's pushes
-    // do not echo back) and cover edits through each book's coverUpdatedOn stamps.
-    public class GrimmoryLibraryChangeForwarder : IHandle<ApplicationStartedEvent>, IDisposable
+    // Forwards metadata and cover edits made in Grimmory to connections that implement
+    // IExternalLibraryEditTarget. Grimmory's database is remote, but with sidecar
+    // write-on-update enabled it rewrites "<book>.metadata.json" (and, when configured,
+    // "<book>.cover.jpg") next to the book after every edit - so, like the calibre forwarder
+    // watching metadata.db, watching the root folders for sidecar writes is the change
+    // signal. No polling. Chaptarr's own pushes also rewrite the sidecar; those are filtered
+    // through GrimmoryPushRegistry rather than by author, so edits a person makes in Grimmory
+    // are forwarded even when they use the connection's own account.
+    public class GrimmoryLibraryChangeForwarder :
+        IHandle<ApplicationStartedEvent>,
+        IHandle<ModelEvent<RootFolder>>,
+        IHandle<ProviderUpdatedEvent<INotification>>,
+        IDisposable
     {
-        private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(2);
-        private static readonly TimeSpan AuditOverlap = TimeSpan.FromMinutes(5);
+        private static readonly TimeSpan DebounceDelay = TimeSpan.FromSeconds(30);
+        private static readonly string[] SidecarSuffixes = { ".metadata.json", ".cover.jpg" };
 
         private readonly INotificationFactory _notificationFactory;
         private readonly IGrimmoryProxy _proxy;
@@ -31,16 +40,10 @@ namespace NzbDrone.Core.Notifications.Grimmory
         private readonly IBookService _bookService;
         private readonly Logger _logger;
 
-        private readonly System.Timers.Timer _timer;
-        private readonly object _pollLock = new object();
-        private readonly ConcurrentDictionary<int, SourceState> _states = new ConcurrentDictionary<int, SourceState>();
-
-        private class SourceState
-        {
-            public DateTime LastAuditPoll { get; set; }
-            public Dictionary<long, (DateTime? Cover, DateTime? AudiobookCover)> CoverStamps { get; } = new Dictionary<long, (DateTime?, DateTime?)>();
-            public bool Primed { get; set; }
-        }
+        private readonly ConcurrentDictionary<int, FileSystemWatcher> _watchers = new ConcurrentDictionary<int, FileSystemWatcher>();
+        private readonly ConcurrentDictionary<string, byte> _pendingSidecars = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+        private readonly System.Timers.Timer _debounce;
+        private readonly object _forwardLock = new object();
 
         public GrimmoryLibraryChangeForwarder(INotificationFactory notificationFactory,
                                               IGrimmoryProxy proxy,
@@ -58,45 +61,237 @@ namespace NzbDrone.Core.Notifications.Grimmory
             _bookService = bookService;
             _logger = logger;
 
-            _timer = new System.Timers.Timer(PollInterval.TotalMilliseconds) { AutoReset = true };
-            _timer.Elapsed += (s, e) => Poll();
+            _debounce = new System.Timers.Timer(DebounceDelay.TotalMilliseconds) { AutoReset = false };
+            _debounce.Elapsed += (s, e) => ForwardPending();
         }
 
         public void Handle(ApplicationStartedEvent message)
         {
-            Poll();
-            _timer.Start();
+            SyncWatchers();
+        }
+
+        public void Handle(ModelEvent<RootFolder> message)
+        {
+            SyncWatchers();
+        }
+
+        public void Handle(ProviderUpdatedEvent<INotification> message)
+        {
+            SyncWatchers();
         }
 
         public void Dispose()
         {
-            _timer.Dispose();
+            _debounce.Dispose();
+
+            foreach (var watcher in _watchers.Values)
+            {
+                watcher.Dispose();
+            }
+
+            _watchers.Clear();
         }
 
-        private void Poll()
+        private void SyncWatchers()
         {
-            if (!System.Threading.Monitor.TryEnter(_pollLock))
+            List<RootFolder> wanted;
+
+            try
+            {
+                wanted = ForwardingSources().Any() ? _rootFolderService.All() : new List<RootFolder>();
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "Unable to evaluate Grimmory forwarding sources");
+                return;
+            }
+
+            var wantedIds = wanted.Select(r => r.Id).ToHashSet();
+
+            foreach (var stale in _watchers.Keys.Where(id => !wantedIds.Contains(id)).ToList())
+            {
+                if (_watchers.TryRemove(stale, out var watcher))
+                {
+                    watcher.Dispose();
+                }
+            }
+
+            foreach (var rootFolder in wanted)
+            {
+                if (_watchers.ContainsKey(rootFolder.Id) || rootFolder.Path.IsNullOrWhiteSpace())
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var watcher = new FileSystemWatcher(rootFolder.Path)
+                    {
+                        IncludeSubdirectories = true,
+                        NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
+                        InternalBufferSize = 65536
+                    };
+
+                    watcher.Filters.Add("*.metadata.json");
+                    watcher.Filters.Add("*.cover.jpg");
+
+                    watcher.Changed += (s, e) => QueueSidecar(e.FullPath);
+                    watcher.Created += (s, e) => QueueSidecar(e.FullPath);
+                    watcher.Renamed += (s, e) => QueueSidecar(e.FullPath);
+                    watcher.Error += (s, e) =>
+                    {
+                        _logger.Debug(e.GetException(), "Grimmory sidecar watcher error for {0}; recreating", rootFolder.Path);
+
+                        if (_watchers.TryRemove(rootFolder.Id, out var broken))
+                        {
+                            broken.Dispose();
+                        }
+
+                        SyncWatchers();
+                    };
+
+                    watcher.EnableRaisingEvents = true;
+
+                    if (!_watchers.TryAdd(rootFolder.Id, watcher))
+                    {
+                        watcher.Dispose();
+                    }
+                    else
+                    {
+                        _logger.Debug("Watching {0} for Grimmory sidecar changes", rootFolder.Path);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.Warn(ex, "Unable to watch {0} for Grimmory sidecar changes", rootFolder.Path);
+                }
+            }
+        }
+
+        public void QueueSidecar(string path)
+        {
+            if (path.IsNullOrWhiteSpace() || !SidecarSuffixes.Any(s => path.EndsWith(s, StringComparison.OrdinalIgnoreCase)))
             {
                 return;
             }
 
-            try
+            _pendingSidecars[path] = 1;
+            _debounce.Stop();
+            _debounce.Start();
+        }
+
+        public void ForwardPending()
+        {
+            lock (_forwardLock)
             {
-                foreach (var source in ForwardingSources())
+                var pending = _pendingSidecars.Keys.ToList();
+                _pendingSidecars.Clear();
+
+                if (pending.Empty())
+                {
+                    return;
+                }
+
+                var sources = ForwardingSources();
+
+                if (sources.Empty())
+                {
+                    return;
+                }
+
+                var forwardedBooks = new HashSet<int>();
+
+                foreach (var sidecarPath in pending)
                 {
                     try
                     {
-                        PollSource(source);
+                        ForwardSidecarChange(sidecarPath, sources, forwardedBooks);
                     }
                     catch (Exception ex)
                     {
-                        _logger.Warn(ex, "Failed to poll Grimmory '{0}' for library edits", source.Definition.Name);
+                        _logger.Warn(ex, "Failed to forward Grimmory edit signalled by {0}", sidecarPath);
                     }
                 }
             }
-            finally
+        }
+
+        private void ForwardSidecarChange(string sidecarPath, List<Grimmory> sources, HashSet<int> forwardedBooks)
+        {
+            var bookFile = ResolveSidecarBookFile(sidecarPath);
+
+            if (bookFile == null)
             {
-                System.Threading.Monitor.Exit(_pollLock);
+                _logger.Debug("No Chaptarr file matches sidecar {0}; skipping forward", sidecarPath);
+                return;
+            }
+
+            var edition = _editionService.GetEdition(bookFile.EditionId);
+            var book = edition == null ? null : _bookService.GetBook(edition.BookId);
+
+            if (book == null || !forwardedBooks.Add(book.Id))
+            {
+                return;
+            }
+
+            if (GrimmoryPushRegistry.WasRecentlyPushed(book.Id))
+            {
+                _logger.Debug("Sidecar change for '{0}' follows Chaptarr's own push; not forwarding back out", book.Title);
+                return;
+            }
+
+            var targets = _notificationFactory.GetAvailableProviders()
+                .OfType<IExternalLibraryEditTarget>()
+                .Where(t => t.AcceptsExternalLibraryEdits)
+                .ToList();
+
+            var files = _mediaFileService.GetFilesByBook(book.Id);
+
+            foreach (var source in sources)
+            {
+                var settings = (GrimmorySettings)source.Definition.Settings;
+                var libraryId = book.MediaType == BookMediaType.Ebook ? settings.EbookLibraryId : settings.AudiobookLibraryId;
+
+                if (libraryId <= 0)
+                {
+                    continue;
+                }
+
+                var relativePath = GetRootRelativePath(bookFile.Path);
+
+                if (relativePath.IsNullOrWhiteSpace())
+                {
+                    continue;
+                }
+
+                var grimmoryBook = _proxy.FindBookByPath(settings, libraryId, relativePath, bypassCache: true);
+
+                if (grimmoryBook == null)
+                {
+                    continue;
+                }
+
+                var sourceTargets = targets.Where(t => t.Definition?.Id != source.Definition.Id).ToList();
+
+                if (sourceTargets.Empty())
+                {
+                    _logger.Debug("Grimmory edit of '{0}' detected but no connections accept library edits", book.Title);
+                    continue;
+                }
+
+                var payload = BuildPayload(settings, grimmoryBook);
+
+                foreach (var target in sourceTargets)
+                {
+                    try
+                    {
+                        target.PushExternalLibraryEdit(book, files, payload);
+                        _logger.Debug("Forwarded Grimmory edit of '{0}' to {1}", book.Title, target.Definition?.Name);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Warn(ex, "Failed to forward Grimmory edit of '{0}' to {1}", book.Title, target.Definition?.Name);
+                    }
+                }
             }
         }
 
@@ -108,176 +303,34 @@ namespace NzbDrone.Core.Notifications.Grimmory
                 .ToList();
         }
 
-        private void PollSource(Grimmory source)
+        private BookFile ResolveSidecarBookFile(string sidecarPath)
         {
-            var settings = (GrimmorySettings)source.Definition.Settings;
-            var state = _states.GetOrAdd(source.Definition.Id, _ => new SourceState { LastAuditPoll = DateTime.UtcNow });
-            var pollStarted = DateTime.UtcNow;
+            var fileName = Path.GetFileName(sidecarPath);
+            var suffix = SidecarSuffixes.FirstOrDefault(s => fileName.EndsWith(s, StringComparison.OrdinalIgnoreCase));
+            var directory = Path.GetDirectoryName(sidecarPath);
 
-            var libraryIds = new[] { settings.EbookLibraryId, settings.AudiobookLibraryId }.Where(id => id > 0).Distinct().ToList();
-            var books = libraryIds
-                .SelectMany(id => FetchLibraryBooks(settings, id))
-                .GroupBy(b => b.Id)
-                .Select(g => g.First())
-                .ToDictionary(b => b.Id);
-
-            var changedIds = new HashSet<long>(DetectCoverChanges(state, books));
-
-            if (state.Primed)
+            if (suffix == null || directory.IsNullOrWhiteSpace())
             {
-                foreach (var entry in _proxy.GetMetadataAuditEntries(settings, state.LastAuditPoll - AuditOverlap))
-                {
-                    if (entry.EntityId == null || entry.EntityType != "Book")
-                    {
-                        continue;
-                    }
-
-                    if (entry.CreatedAt == null || entry.CreatedAt <= state.LastAuditPoll - AuditOverlap)
-                    {
-                        continue;
-                    }
-
-                    if (entry.Username.IsNotNullOrWhiteSpace() && entry.Username.Equals(settings.Username, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    changedIds.Add(entry.EntityId.Value);
-                }
+                return null;
             }
 
-            state.LastAuditPoll = pollStarted;
+            var baseName = fileName.Substring(0, fileName.Length - suffix.Length);
 
-            if (!state.Primed)
-            {
-                state.Primed = true;
-                return;
-            }
-
-            if (changedIds.Empty())
-            {
-                return;
-            }
-
-            var targets = _notificationFactory.GetAvailableProviders()
-                .OfType<IExternalLibraryEditTarget>()
-                .Where(t => t.AcceptsExternalLibraryEdits && t.Definition?.Id != source.Definition.Id)
-                .ToList();
-
-            if (targets.Empty())
-            {
-                _logger.Debug("Grimmory '{0}' has {1} changed book(s) but no connections accept library edits", source.Definition.Name, changedIds.Count);
-                return;
-            }
-
-            foreach (var grimmoryId in changedIds)
-            {
-                if (!books.TryGetValue(grimmoryId, out var grimmoryBook))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    ForwardBook(settings, grimmoryBook, targets);
-                }
-                catch (Exception ex)
-                {
-                    _logger.Warn(ex, "Failed to forward Grimmory edit for book {0}", grimmoryId);
-                }
-            }
+            return _mediaFileService.GetFilesWithBasePath(directory)
+                .FirstOrDefault(f => f?.Path.IsNotNullOrWhiteSpace() == true &&
+                    Path.GetFileNameWithoutExtension(f.Path).Equals(baseName, StringComparison.OrdinalIgnoreCase));
         }
 
-        private List<GrimmoryBook> FetchLibraryBooks(GrimmorySettings settings, long libraryId)
+        private string GetRootRelativePath(string path)
         {
-            try
+            var rootFolder = _rootFolderService.GetBestRootFolder(path);
+
+            if (rootFolder?.Path == null || rootFolder.Path.PathEquals(path))
             {
-                return _proxy.GetLibraryBooks(settings, libraryId, bypassCache: true);
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn(ex, "Failed to list Grimmory library {0}", libraryId);
-                return new List<GrimmoryBook>();
-            }
-        }
-
-        private List<long> DetectCoverChanges(SourceState state, Dictionary<long, GrimmoryBook> books)
-        {
-            var changed = new List<long>();
-
-            foreach (var book in books.Values)
-            {
-                var stamps = (book.Metadata?.CoverUpdatedOn, book.Metadata?.AudiobookCoverUpdatedOn);
-
-                if (state.CoverStamps.TryGetValue(book.Id, out var previous) && state.Primed)
-                {
-                    if ((stamps.Item1 != null && stamps.Item1 > (previous.Cover ?? DateTime.MinValue)) ||
-                        (stamps.Item2 != null && stamps.Item2 > (previous.AudiobookCover ?? DateTime.MinValue)))
-                    {
-                        changed.Add(book.Id);
-                    }
-                }
-
-                state.CoverStamps[book.Id] = stamps;
+                return null;
             }
 
-            return changed;
-        }
-
-        private void ForwardBook(GrimmorySettings settings, GrimmoryBook grimmoryBook, List<IExternalLibraryEditTarget> targets)
-        {
-            var bookFile = ResolveBookFile(grimmoryBook);
-
-            if (bookFile == null)
-            {
-                _logger.Debug("No Chaptarr file matches Grimmory book {0}; skipping forward", grimmoryBook.Id);
-                return;
-            }
-
-            var edition = _editionService.GetEdition(bookFile.EditionId);
-            var book = edition == null ? null : _bookService.GetBook(edition.BookId);
-
-            if (book == null)
-            {
-                return;
-            }
-
-            var files = _mediaFileService.GetFilesByBook(book.Id);
-            var payload = BuildPayload(settings, grimmoryBook);
-
-            foreach (var target in targets)
-            {
-                try
-                {
-                    target.PushExternalLibraryEdit(book, files, payload);
-                    _logger.Debug("Forwarded Grimmory edit of '{0}' to {1}", book.Title, target.Definition?.Name);
-                }
-                catch (Exception ex)
-                {
-                    _logger.Warn(ex, "Failed to forward Grimmory edit of '{0}' to {1}", book.Title, target.Definition?.Name);
-                }
-            }
-        }
-
-        private BookFile ResolveBookFile(GrimmoryBook grimmoryBook)
-        {
-            foreach (var relativePath in grimmoryBook.AllFiles().Select(f => f?.RelativePath()).Where(p => p.IsNotNullOrWhiteSpace()))
-            {
-                var osRelative = relativePath.Replace('/', Path.DirectorySeparatorChar);
-
-                foreach (var rootFolder in _rootFolderService.All())
-                {
-                    var candidate = Path.Combine(rootFolder.Path, osRelative);
-                    var file = _mediaFileService.GetFileWithPath(candidate);
-
-                    if (file != null)
-                    {
-                        return file;
-                    }
-                }
-            }
-
-            return null;
+            return rootFolder.Path.GetRelativePath(path);
         }
 
         private ExternalLibraryEditPayload BuildPayload(GrimmorySettings settings, GrimmoryBook grimmoryBook)

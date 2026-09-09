@@ -23,7 +23,6 @@ namespace NzbDrone.Core.Notifications.Grimmory
         void UploadBookCover(GrimmorySettings settings, long bookId, byte[] image, string fileName);
         byte[] GetBookCover(GrimmorySettings settings, long bookId);
         string BuildCoverUrl(GrimmorySettings settings, long bookId);
-        List<GrimmoryAuditEntry> GetMetadataAuditEntries(GrimmorySettings settings, DateTime fromUtc);
         ValidationFailure Test(GrimmorySettings settings);
     }
 
@@ -31,8 +30,6 @@ namespace NzbDrone.Core.Notifications.Grimmory
     {
         private static readonly TimeSpan TokenCacheDuration = TimeSpan.FromMinutes(30);
         private static readonly TimeSpan BookListCacheDuration = TimeSpan.FromMinutes(1);
-        private const int AuditPageSize = 200;
-        private const int MaxAuditPages = 5;
 
         private readonly IHttpClient _httpClient;
         private readonly ICached<string> _tokenCache;
@@ -164,43 +161,6 @@ namespace NzbDrone.Core.Notifications.Grimmory
             return $"{HttpUri.CombinePath(settings.Url, $"api/v1/media/book/{bookId}/cover")}?token={token}";
         }
 
-        public List<GrimmoryAuditEntry> GetMetadataAuditEntries(GrimmorySettings settings, DateTime fromUtc)
-        {
-            var entries = new List<GrimmoryAuditEntry>();
-
-            for (var page = 0; page < MaxAuditPages; page++)
-            {
-                var pageNumber = page;
-                var response = ExecuteWithAuth(settings, token =>
-                {
-                    var request = BuildRequest(settings, "api/v1/audit-logs", token)
-                        .AddQueryParam("action", "METADATA_UPDATED")
-                        .AddQueryParam("size", AuditPageSize)
-                        .AddQueryParam("page", pageNumber)
-                        .AddQueryParam("from", fromUtc.ToString("yyyy-MM-dd'T'HH:mm:ss"))
-                        .Build();
-
-                    return _httpClient.Get(request);
-                });
-
-                var result = Json.Deserialize<GrimmoryAuditPage>(response.Content);
-
-                if (result?.Content == null)
-                {
-                    break;
-                }
-
-                entries.AddRange(result.Content);
-
-                if (result.Last)
-                {
-                    break;
-                }
-            }
-
-            return entries;
-        }
-
         public ValidationFailure Test(GrimmorySettings settings)
         {
             try
@@ -217,17 +177,6 @@ namespace NzbDrone.Core.Notifications.Grimmory
                     return new ValidationFailure(nameof(GrimmorySettings.AudiobookLibraryId), "The selected audiobook library was not found in Grimmory");
                 }
 
-                if (settings.ForwardEdits)
-                {
-                    try
-                    {
-                        GetMetadataAuditEntries(settings, DateTime.UtcNow.AddMinutes(-1));
-                    }
-                    catch (HttpException ex) when (ex.Response?.StatusCode == HttpStatusCode.Forbidden || ex.Response?.StatusCode == HttpStatusCode.Unauthorized)
-                    {
-                        return new ValidationFailure(nameof(GrimmorySettings.ForwardEdits), "Forwarding Grimmory edits requires an admin user, as change detection reads the audit log");
-                    }
-                }
             }
             catch (GrimmoryAuthenticationException)
             {
@@ -451,33 +400,6 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
         [JsonProperty("audiobookCoverUpdatedOn")]
         public DateTime? AudiobookCoverUpdatedOn { get; set; }
-    }
-
-    public class GrimmoryAuditPage
-    {
-        [JsonProperty("content")]
-        public List<GrimmoryAuditEntry> Content { get; set; }
-
-        [JsonProperty("last")]
-        public bool Last { get; set; }
-    }
-
-    public class GrimmoryAuditEntry
-    {
-        [JsonProperty("id")]
-        public long Id { get; set; }
-
-        [JsonProperty("username")]
-        public string Username { get; set; }
-
-        [JsonProperty("entityType")]
-        public string EntityType { get; set; }
-
-        [JsonProperty("entityId")]
-        public long? EntityId { get; set; }
-
-        [JsonProperty("createdAt")]
-        public DateTime? CreatedAt { get; set; }
     }
 
     public class GrimmoryAuthenticationException : Exception

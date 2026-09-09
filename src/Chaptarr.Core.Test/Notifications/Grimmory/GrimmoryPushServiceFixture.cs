@@ -23,6 +23,12 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
         private const long EbookLibraryId = 3;
         private const long AudiobookLibraryId = 4;
 
+        [SetUp]
+        public void Setup()
+        {
+            GrimmoryPushRegistry.Clear();
+        }
+
         public class StubProxy : DispatchProxy
         {
             public Dictionary<string, Func<object[], object>> Handlers { get; } = new Dictionary<string, Func<object[], object>>();
@@ -64,7 +70,6 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             public void UploadBookCover(GrimmorySettings settings, long bookId, byte[] image, string fileName) => CoverUploads.Add((bookId, fileName));
             public byte[] GetBookCover(GrimmorySettings settings, long bookId) => null;
             public string BuildCoverUrl(GrimmorySettings settings, long bookId) => $"http://grimmory/cover/{bookId}";
-            public List<GrimmoryAuditEntry> GetMetadataAuditEntries(GrimmorySettings settings, DateTime fromUtc) => new List<GrimmoryAuditEntry>();
             public ValidationFailure Test(GrimmorySettings settings) => null;
         }
 
@@ -212,6 +217,22 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
                 Assert.That(metadata["isbn13Locked"], Is.True);
                 Assert.That(metadata.ContainsKey("publisher"), Is.False);
             });
+        }
+
+        [Test]
+        public void should_record_push_in_registry_for_echo_suppression()
+        {
+            var context = CreateContext();
+            context.Proxy.BooksByPath["Robin Hobb/Assassin's Apprentice/Assassin's Apprentice.epub"] = GrimmoryBookAt("Robin Hobb/Assassin's Apprentice/Assassin's Apprentice.epub");
+
+            context.Service.Execute(new PushGrimmoryMetadataCommand
+            {
+                BookIds = new List<int> { 10 },
+                Fields = new List<string> { "title" }
+            });
+
+            Assert.That(GrimmoryPushRegistry.WasRecentlyPushed(10), Is.True);
+            Assert.That(GrimmoryPushRegistry.WasRecentlyPushed(11), Is.False);
         }
 
         [Test]

@@ -46,7 +46,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
         [FieldDefinition(6, Label = "Push Covers", Type = FieldType.Checkbox, HelpText = "Push Chaptarr's cover image for a book to Grimmory whenever the book is imported, retagged, or its cover changes in Chaptarr")]
         public bool PushCovers { get; set; }
 
-        [FieldDefinition(7, Label = "Forward Grimmory Edits", Type = FieldType.Checkbox, HelpText = "Watch Grimmory for metadata and cover edits and forward them to other connections that accept library edits. The Grimmory user must be an admin, as change detection reads the audit log")]
+        [FieldDefinition(7, Label = "Forward Grimmory Edits", Type = FieldType.Checkbox, HelpText = "Forward metadata and cover edits made in Grimmory to other connections that accept library edits. Requires Grimmory's sidecar 'write on update' setting so edits appear as sidecar files Chaptarr can watch for")]
         public bool ForwardEdits { get; set; }
 
         public NzbDroneValidationResult Validate()

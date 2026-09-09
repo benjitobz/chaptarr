@@ -251,7 +251,6 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             public void UploadBookCover(GrimmorySettings settings, long bookId, byte[] image, string fileName) { }
             public byte[] GetBookCover(GrimmorySettings settings, long bookId) => null;
             public string BuildCoverUrl(GrimmorySettings settings, long bookId) => string.Empty;
-            public List<GrimmoryAuditEntry> GetMetadataAuditEntries(GrimmorySettings settings, DateTime fromUtc) => new List<GrimmoryAuditEntry>();
         }
     }
 }
