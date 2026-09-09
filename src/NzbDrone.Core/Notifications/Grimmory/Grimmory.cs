@@ -7,18 +7,21 @@ using NzbDrone.Common.Cache;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Books;
 using NzbDrone.Core.MediaFiles;
+using NzbDrone.Core.Messaging.Commands;
 
 namespace NzbDrone.Core.Notifications.Grimmory
 {
     public class Grimmory : NotificationBase<GrimmorySettings>
     {
         private readonly IGrimmoryProxy _proxy;
+        private readonly IManageCommandQueue _commandQueueManager;
         private readonly Logger _logger;
         private readonly ICached<GrimmoryUpdateQueue> _pendingLibrariesCache;
 
-        public Grimmory(IGrimmoryProxy proxy, ICacheManager cacheManager, Logger logger)
+        public Grimmory(IGrimmoryProxy proxy, IManageCommandQueue commandQueueManager, ICacheManager cacheManager, Logger logger)
         {
             _proxy = proxy;
+            _commandQueueManager = commandQueueManager;
             _logger = logger;
             _pendingLibrariesCache = cacheManager.GetRollingCache<GrimmoryUpdateQueue>(GetType(), "pendingLibraries", TimeSpan.FromDays(1));
         }
@@ -58,6 +61,9 @@ namespace NzbDrone.Core.Notifications.Grimmory
             }
 
             QueueRefresh(GetLibraryId(message.Book, message.BookFiles.FirstOrDefault()), "import");
+
+            // The push waits for Grimmory's (async) refresh to ingest the new files first.
+            QueueAutoPush(message.Book, waitForBook: true);
         }
 
         public override void OnRename(Author author, List<RenamedBookFile> renamedFiles)
@@ -96,6 +102,29 @@ namespace NzbDrone.Core.Notifications.Grimmory
         public override void OnBookRetag(BookRetagMessage message)
         {
             QueueRefresh(GetLibraryId(message.Book, message.BookFile), "retag");
+            QueueAutoPush(message.Book, waitForBook: false);
+        }
+
+        private void QueueAutoPush(Book book, bool waitForBook)
+        {
+            if (book == null || (!Settings.PushMetadata && !Settings.PushCovers))
+            {
+                return;
+            }
+
+            var fields = GrimmoryPushService.ToggleFields(Settings);
+
+            if (fields.Empty())
+            {
+                return;
+            }
+
+            _commandQueueManager.Push(new PushGrimmoryMetadataCommand
+            {
+                BookIds = new List<int> { book.Id },
+                Fields = fields,
+                WaitForBook = waitForBook
+            });
         }
 
         public override void ProcessQueue()

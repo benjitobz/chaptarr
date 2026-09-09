@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using FluentValidation.Results;
@@ -16,21 +17,33 @@ namespace NzbDrone.Core.Notifications.Grimmory
     {
         List<GrimmoryLibrary> GetLibraries(GrimmorySettings settings);
         void RefreshLibrary(GrimmorySettings settings, long libraryId);
+        List<GrimmoryBook> GetLibraryBooks(GrimmorySettings settings, long libraryId, bool bypassCache = false);
+        GrimmoryBook FindBookByPath(GrimmorySettings settings, long libraryId, string relativePath, bool bypassCache = false);
+        void UpdateBookMetadata(GrimmorySettings settings, long bookId, Dictionary<string, object> metadata);
+        void UploadBookCover(GrimmorySettings settings, long bookId, byte[] image, string fileName);
+        byte[] GetBookCover(GrimmorySettings settings, long bookId);
+        string BuildCoverUrl(GrimmorySettings settings, long bookId);
+        List<GrimmoryAuditEntry> GetMetadataAuditEntries(GrimmorySettings settings, DateTime fromUtc);
         ValidationFailure Test(GrimmorySettings settings);
     }
 
     public class GrimmoryProxy : IGrimmoryProxy
     {
         private static readonly TimeSpan TokenCacheDuration = TimeSpan.FromMinutes(30);
+        private static readonly TimeSpan BookListCacheDuration = TimeSpan.FromMinutes(1);
+        private const int AuditPageSize = 200;
+        private const int MaxAuditPages = 5;
 
         private readonly IHttpClient _httpClient;
         private readonly ICached<string> _tokenCache;
+        private readonly ICached<List<GrimmoryBook>> _bookListCache;
         private readonly Logger _logger;
 
         public GrimmoryProxy(IHttpClient httpClient, ICacheManager cacheManager, Logger logger)
         {
             _httpClient = httpClient;
             _tokenCache = cacheManager.GetCache<string>(GetType(), "tokens");
+            _bookListCache = cacheManager.GetCache<List<GrimmoryBook>>(GetType(), "books");
             _logger = logger;
         }
 
@@ -57,6 +70,137 @@ namespace NzbDrone.Core.Notifications.Grimmory
             _logger.Debug("Triggered Grimmory refresh for library {0}", libraryId);
         }
 
+        public List<GrimmoryBook> GetLibraryBooks(GrimmorySettings settings, long libraryId, bool bypassCache = false)
+        {
+            var cacheKey = $"{settings.Url}:{settings.Username}:{libraryId}";
+
+            if (bypassCache)
+            {
+                _bookListCache.Remove(cacheKey);
+            }
+
+            return _bookListCache.Get(cacheKey,
+                () =>
+                {
+                    var response = ExecuteWithAuth(settings, token =>
+                    {
+                        var request = BuildRequest(settings, $"api/v1/libraries/{libraryId}/book", token).Build();
+                        return _httpClient.Get(request);
+                    });
+
+                    return Json.Deserialize<List<GrimmoryBook>>(response.Content) ?? new List<GrimmoryBook>();
+                },
+                BookListCacheDuration);
+        }
+
+        public GrimmoryBook FindBookByPath(GrimmorySettings settings, long libraryId, string relativePath, bool bypassCache = false)
+        {
+            var normalized = NormalizeRelativePath(relativePath);
+
+            if (normalized.IsNullOrWhiteSpace())
+            {
+                return null;
+            }
+
+            return GetLibraryBooks(settings, libraryId, bypassCache)
+                .FirstOrDefault(b => b.AllFiles().Any(f => NormalizeRelativePath(f?.RelativePath()) == normalized));
+        }
+
+        public void UpdateBookMetadata(GrimmorySettings settings, long bookId, Dictionary<string, object> metadata)
+        {
+            ExecuteWithAuth(settings, token =>
+            {
+                var request = BuildRequest(settings, $"api/v1/books/{bookId}/metadata", token)
+                    .AddQueryParam("replaceMode", "REPLACE_WHEN_PROVIDED")
+                    .Build();
+
+                request.Method = HttpMethod.Put;
+                request.Headers.ContentType = "application/json";
+                request.SetContent(new Dictionary<string, object> { { "metadata", metadata } }.ToJson());
+
+                return _httpClient.Execute(request);
+            });
+
+            _logger.Debug("Updated Grimmory metadata for book {0}", bookId);
+        }
+
+        public void UploadBookCover(GrimmorySettings settings, long bookId, byte[] image, string fileName)
+        {
+            ExecuteWithAuth(settings, token =>
+            {
+                var request = BuildRequest(settings, $"api/v1/books/{bookId}/metadata/cover/upload", token)
+                    .Post()
+                    .AddFormUpload("file", fileName, image, GetImageContentType(fileName))
+                    .Build();
+
+                return _httpClient.Execute(request);
+            });
+
+            _logger.Debug("Uploaded Grimmory cover for book {0}", bookId);
+        }
+
+        public byte[] GetBookCover(GrimmorySettings settings, long bookId)
+        {
+            try
+            {
+                var response = ExecuteWithAuth(settings, token =>
+                {
+                    var request = BuildRequest(settings, $"api/v1/media/book/{bookId}/cover", token).Build();
+                    return _httpClient.Get(request);
+                });
+
+                return response.ResponseData;
+            }
+            catch (HttpException ex) when (ex.Response?.StatusCode == HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+        }
+
+        public string BuildCoverUrl(GrimmorySettings settings, long bookId)
+        {
+            var token = GetAccessToken(settings, false);
+
+            return $"{HttpUri.CombinePath(settings.Url, $"api/v1/media/book/{bookId}/cover")}?token={token}";
+        }
+
+        public List<GrimmoryAuditEntry> GetMetadataAuditEntries(GrimmorySettings settings, DateTime fromUtc)
+        {
+            var entries = new List<GrimmoryAuditEntry>();
+
+            for (var page = 0; page < MaxAuditPages; page++)
+            {
+                var pageNumber = page;
+                var response = ExecuteWithAuth(settings, token =>
+                {
+                    var request = BuildRequest(settings, "api/v1/audit-logs", token)
+                        .AddQueryParam("action", "METADATA_UPDATED")
+                        .AddQueryParam("size", AuditPageSize)
+                        .AddQueryParam("page", pageNumber)
+                        .AddQueryParam("from", fromUtc.ToString("yyyy-MM-dd'T'HH:mm:ss"))
+                        .Build();
+
+                    return _httpClient.Get(request);
+                });
+
+                var result = Json.Deserialize<GrimmoryAuditPage>(response.Content);
+
+                if (result?.Content == null)
+                {
+                    break;
+                }
+
+                entries.AddRange(result.Content);
+
+                if (result.Last)
+                {
+                    break;
+                }
+            }
+
+            return entries;
+        }
+
         public ValidationFailure Test(GrimmorySettings settings)
         {
             try
@@ -72,6 +216,18 @@ namespace NzbDrone.Core.Notifications.Grimmory
                 {
                     return new ValidationFailure(nameof(GrimmorySettings.AudiobookLibraryId), "The selected audiobook library was not found in Grimmory");
                 }
+
+                if (settings.ForwardEdits)
+                {
+                    try
+                    {
+                        GetMetadataAuditEntries(settings, DateTime.UtcNow.AddMinutes(-1));
+                    }
+                    catch (HttpException ex) when (ex.Response?.StatusCode == HttpStatusCode.Forbidden || ex.Response?.StatusCode == HttpStatusCode.Unauthorized)
+                    {
+                        return new ValidationFailure(nameof(GrimmorySettings.ForwardEdits), "Forwarding Grimmory edits requires an admin user, as change detection reads the audit log");
+                    }
+                }
             }
             catch (GrimmoryAuthenticationException)
             {
@@ -84,6 +240,24 @@ namespace NzbDrone.Core.Notifications.Grimmory
             }
 
             return null;
+        }
+
+        private static string NormalizeRelativePath(string path)
+        {
+            return path?.Replace('\\', '/').Trim('/').ToLowerInvariant() ?? string.Empty;
+        }
+
+        private static string GetImageContentType(string fileName)
+        {
+            var extension = System.IO.Path.GetExtension(fileName)?.ToLowerInvariant();
+
+            return extension switch
+            {
+                ".png" => "image/png",
+                ".gif" => "image/gif",
+                ".webp" => "image/webp",
+                _ => "image/jpeg"
+            };
         }
 
         private HttpResponse ExecuteWithAuth(GrimmorySettings settings, Func<string, HttpResponse> action)
@@ -184,6 +358,126 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
         [JsonProperty("allowedFormats")]
         public List<string> AllowedFormats { get; set; }
+    }
+
+    public class GrimmoryBook
+    {
+        [JsonProperty("id")]
+        public long Id { get; set; }
+
+        [JsonProperty("libraryId")]
+        public long LibraryId { get; set; }
+
+        [JsonProperty("primaryFile")]
+        public GrimmoryBookFile PrimaryFile { get; set; }
+
+        [JsonProperty("alternativeFormats")]
+        public List<GrimmoryBookFile> AlternativeFormats { get; set; }
+
+        [JsonProperty("metadata")]
+        public GrimmoryBookMetadata Metadata { get; set; }
+
+        public IEnumerable<GrimmoryBookFile> AllFiles()
+        {
+            if (PrimaryFile != null)
+            {
+                yield return PrimaryFile;
+            }
+
+            foreach (var file in AlternativeFormats ?? Enumerable.Empty<GrimmoryBookFile>())
+            {
+                yield return file;
+            }
+        }
+    }
+
+    public class GrimmoryBookFile
+    {
+        [JsonProperty("fileName")]
+        public string FileName { get; set; }
+
+        [JsonProperty("fileSubPath")]
+        public string FileSubPath { get; set; }
+
+        public string RelativePath()
+        {
+            return FileSubPath.IsNotNullOrWhiteSpace() ? $"{FileSubPath}/{FileName}" : FileName;
+        }
+    }
+
+    public class GrimmoryBookMetadata
+    {
+        [JsonProperty("title")]
+        public string Title { get; set; }
+
+        [JsonProperty("subtitle")]
+        public string Subtitle { get; set; }
+
+        [JsonProperty("description")]
+        public string Description { get; set; }
+
+        [JsonProperty("publisher")]
+        public string Publisher { get; set; }
+
+        [JsonProperty("publishedDate")]
+        public string PublishedDate { get; set; }
+
+        [JsonProperty("seriesName")]
+        public string SeriesName { get; set; }
+
+        [JsonProperty("seriesNumber")]
+        public double? SeriesNumber { get; set; }
+
+        [JsonProperty("language")]
+        public string Language { get; set; }
+
+        [JsonProperty("isbn13")]
+        public string Isbn13 { get; set; }
+
+        [JsonProperty("asin")]
+        public string Asin { get; set; }
+
+        [JsonProperty("goodreadsId")]
+        public string GoodreadsId { get; set; }
+
+        [JsonProperty("authors")]
+        public List<string> Authors { get; set; }
+
+        [JsonProperty("categories")]
+        public List<string> Categories { get; set; }
+
+        [JsonProperty("coverUpdatedOn")]
+        public DateTime? CoverUpdatedOn { get; set; }
+
+        [JsonProperty("audiobookCoverUpdatedOn")]
+        public DateTime? AudiobookCoverUpdatedOn { get; set; }
+    }
+
+    public class GrimmoryAuditPage
+    {
+        [JsonProperty("content")]
+        public List<GrimmoryAuditEntry> Content { get; set; }
+
+        [JsonProperty("last")]
+        public bool Last { get; set; }
+    }
+
+    public class GrimmoryAuditEntry
+    {
+        [JsonProperty("id")]
+        public long Id { get; set; }
+
+        [JsonProperty("username")]
+        public string Username { get; set; }
+
+        [JsonProperty("entityType")]
+        public string EntityType { get; set; }
+
+        [JsonProperty("entityId")]
+        public long? EntityId { get; set; }
+
+        [JsonProperty("createdAt")]
+        public DateTime? CreatedAt { get; set; }
     }
 
     public class GrimmoryAuthenticationException : Exception

@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using FluentValidation.Results;
 using NLog;
 using NUnit.Framework;
 using NzbDrone.Common.Cache;
 using NzbDrone.Core.Books;
 using NzbDrone.Core.MediaFiles;
+using NzbDrone.Core.Messaging.Commands;
 using NzbDrone.Core.Notifications;
 using NzbDrone.Core.Notifications.Grimmory;
 using NzbDrone.Core.Qualities;
@@ -201,11 +203,20 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
 
             return new NzbDrone.Core.Notifications.Grimmory.Grimmory(
                 proxy,
+                DispatchProxy.Create<IManageCommandQueue, InertCommandQueueProxy>(),
                 new CacheManager(),
                 LogManager.GetLogger("GrimmoryFixture"))
             {
                 Definition = new NotificationDefinition { Settings = settings }
             };
+        }
+
+        public class InertCommandQueueProxy : DispatchProxy
+        {
+            protected override object Invoke(MethodInfo targetMethod, object[] args)
+            {
+                return null;
+            }
         }
 
         private class FakeGrimmoryProxy : IGrimmoryProxy
@@ -233,6 +244,14 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             {
                 return null;
             }
+
+            public List<GrimmoryBook> GetLibraryBooks(GrimmorySettings settings, long libraryId, bool bypassCache = false) => new List<GrimmoryBook>();
+            public GrimmoryBook FindBookByPath(GrimmorySettings settings, long libraryId, string relativePath, bool bypassCache = false) => null;
+            public void UpdateBookMetadata(GrimmorySettings settings, long bookId, Dictionary<string, object> metadata) { }
+            public void UploadBookCover(GrimmorySettings settings, long bookId, byte[] image, string fileName) { }
+            public byte[] GetBookCover(GrimmorySettings settings, long bookId) => null;
+            public string BuildCoverUrl(GrimmorySettings settings, long bookId) => string.Empty;
+            public List<GrimmoryAuditEntry> GetMetadataAuditEntries(GrimmorySettings settings, DateTime fromUtc) => new List<GrimmoryAuditEntry>();
         }
     }
 }

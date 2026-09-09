@@ -16,6 +16,7 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
     public class GrimmoryProxyFixture
     {
         private const string LibrariesJson = "[{\"id\":10,\"name\":\"Ebooks\",\"allowedFormats\":[\"EPUB\",\"PDF\"]},{\"id\":20,\"name\":\"Audiobooks\",\"allowedFormats\":[\"AUDIOBOOK\"]}]";
+        private const string LibraryBooksJson = "[{\"id\":100,\"libraryId\":10,\"primaryFile\":{\"fileName\":\"Book One.epub\",\"fileSubPath\":\"Author Name/Book One\"},\"metadata\":{\"title\":\"Book One\"}}]";
 
         [Test]
         public void should_login_and_fetch_libraries_with_bearer_token()
@@ -117,6 +118,58 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             Assert.That(proxy.Test(BuildSettings()), Is.Null);
         }
 
+        [Test]
+        public void should_find_book_by_path_ignoring_slash_direction_and_case()
+        {
+            var httpClient = new ScriptedHttpClient { ValidTokens = { "token1" } };
+            var proxy = CreateProxy(httpClient);
+
+            var book = proxy.FindBookByPath(BuildSettings(), 10, "Author Name\\book one\\Book One.epub");
+
+            Assert.That(book, Is.Not.Null);
+            Assert.That(book.Id, Is.EqualTo(100));
+        }
+
+        [Test]
+        public void should_send_metadata_update_with_replace_when_provided_mode()
+        {
+            var httpClient = new ScriptedHttpClient { ValidTokens = { "token1" } };
+            var proxy = CreateProxy(httpClient);
+
+            proxy.UpdateBookMetadata(BuildSettings(), 100, new Dictionary<string, object> { { "title", "New Title" }, { "titleLocked", true } });
+
+            var request = httpClient.Requests.Last();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(request.Method, Is.EqualTo(HttpMethod.Put));
+                Assert.That(request.Url.ToString(), Does.Contain("/api/v1/books/100/metadata"));
+                Assert.That(request.Url.ToString(), Does.Contain("replaceMode=REPLACE_WHEN_PROVIDED"));
+
+                var body = System.Text.Encoding.UTF8.GetString(request.ContentData);
+                Assert.That(body, Does.Contain("\"metadata\""));
+                Assert.That(body, Does.Contain("\"titleLocked\": true").Or.Contain("\"titleLocked\":true"));
+            });
+        }
+
+        [Test]
+        public void should_upload_cover_as_multipart_file()
+        {
+            var httpClient = new ScriptedHttpClient { ValidTokens = { "token1" } };
+            var proxy = CreateProxy(httpClient);
+
+            proxy.UploadBookCover(BuildSettings(), 100, new byte[] { 1, 2, 3 }, "cover.jpg");
+
+            var request = httpClient.Requests.Last();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(request.Method, Is.EqualTo(HttpMethod.Post));
+                Assert.That(request.Url.ToString(), Does.EndWith("/api/v1/books/100/metadata/cover/upload"));
+                Assert.That(request.Headers.ContentType, Does.Contain("multipart/form-data"));
+            });
+        }
+
         private static GrimmoryProxy CreateProxy(ScriptedHttpClient httpClient)
         {
             return new GrimmoryProxy(httpClient, new CacheManager(), LogManager.GetLogger("GrimmoryProxyFixture"));
@@ -177,6 +230,21 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
                 if (url.Contains("/api/v1/libraries/") && url.EndsWith("/refresh"))
                 {
                     return new HttpResponse(request, headers, string.Empty, HttpStatusCode.NoContent);
+                }
+
+                if (url.Contains("/api/v1/libraries/") && url.EndsWith("/book"))
+                {
+                    return new HttpResponse(request, headers, LibraryBooksJson);
+                }
+
+                if (url.Contains("/metadata/cover/upload"))
+                {
+                    return new HttpResponse(request, headers, string.Empty);
+                }
+
+                if (url.Contains("/api/v1/books/") && url.Contains("/metadata"))
+                {
+                    return new HttpResponse(request, headers, "{}");
                 }
 
                 return new HttpResponse(request, headers, string.Empty, HttpStatusCode.NotFound);

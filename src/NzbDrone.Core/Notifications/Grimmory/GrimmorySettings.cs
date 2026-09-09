@@ -40,6 +40,15 @@ namespace NzbDrone.Core.Notifications.Grimmory
         [FieldDefinition(4, Label = "Audiobook Library", Type = FieldType.Select, SelectOptionsProviderAction = "getLibraries", HelpText = "Grimmory library to refresh when Chaptarr imports, renames or deletes audiobook files. Leave unset to ignore audiobooks")]
         public long AudiobookLibraryId { get; set; }
 
+        [FieldDefinition(5, Label = "Push Metadata", Type = FieldType.Checkbox, HelpText = "Push Chaptarr's metadata for a book to Grimmory, locking the pushed fields there, whenever the book is imported, retagged, or its metadata changes in Chaptarr")]
+        public bool PushMetadata { get; set; }
+
+        [FieldDefinition(6, Label = "Push Covers", Type = FieldType.Checkbox, HelpText = "Push Chaptarr's cover image for a book to Grimmory whenever the book is imported, retagged, or its cover changes in Chaptarr")]
+        public bool PushCovers { get; set; }
+
+        [FieldDefinition(7, Label = "Forward Grimmory Edits", Type = FieldType.Checkbox, HelpText = "Watch Grimmory for metadata and cover edits and forward them to other connections that accept library edits. The Grimmory user must be an admin, as change detection reads the audit log")]
+        public bool ForwardEdits { get; set; }
+
         public NzbDroneValidationResult Validate()
         {
             return new NzbDroneValidationResult(Validator.Validate(this));
