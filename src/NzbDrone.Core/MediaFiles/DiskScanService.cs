@@ -185,7 +185,24 @@ namespace NzbDrone.Core.MediaFiles
                     }
                     else if (!result.ScannedFilePaths.Any())
                     {
-                        _logger.Warn("Skipping scan cleanup for {0} because the scan found no media files. This avoids wiping tracked files when a mount is visible but empty.", folder);
+                        // An empty result is ambiguous: a mount that dropped out from under the
+                        // scan, or files genuinely deleted (e.g. a book removed in an external
+                        // library app). For a subfolder of a root that provably still has content
+                        // it is the latter, and skipping would leave the pruned-on-disk book
+                        // tracked forever; only a root-level empty scan keeps the mount guard.
+                        var subfolderOfHealthyRoot = !rootFolder.Path.PathEquals(folder) &&
+                            _diskProvider.FolderExists(rootFolder.Path) &&
+                            _diskProvider.GetDirectories(rootFolder.Path).Any();
+
+                        if (subfolderOfHealthyRoot)
+                        {
+                            _logger.Debug("Scan of {0} found no media files but root folder {1} is populated; cleaning up files tracked under it", folder, rootFolder.Path);
+                            CleanMediaFiles(folder, result.ScannedFilePaths, rootFolder);
+                        }
+                        else
+                        {
+                            _logger.Warn("Skipping scan cleanup for {0} because the scan found no media files. This avoids wiping tracked files when a mount is visible but empty.", folder);
+                        }
                     }
                     else
                     {
