@@ -25,7 +25,6 @@ namespace NzbDrone.Core.Books.Calibre
         public decimal Rating { get; set; }
         public Dictionary<string, string> Identifiers { get; set; }
         [JsonProperty(NullValueHandling = NullValueHandling.Include)]
-        // Omitted when null so a push cannot erase a series calibre-web learned on its own.
         public string Series { get; set; }
         [JsonProperty("series_index")]
         public double? SeriesIndex { get; set; }

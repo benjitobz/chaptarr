@@ -68,14 +68,14 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
         public string EbookLibraryId { get; set; }
 
+        [FieldDefinition(5, Type = FieldType.Textbox, Hidden = HiddenType.Hidden)]
+        public string LibraryMappingsJson { get; set; }
+
         [FieldDefinition(6, Label = "Remove Missing Items After Delete", Type = FieldType.Checkbox, HelpText = "AudioBookShelf marks deleted books as missing instead of removing them. When Chaptarr deletes books or files, also remove library items whose files are gone")]
         public bool RemoveMissingItems { get; set; }
 
         [FieldDefinition(7, Label = "Push Library Edits", Type = FieldType.Checkbox, HelpText = "When Chaptarr changes a book - a calibre push, a retag, or an edit - send the current title, description, publisher, series and cover to the matching AudioBookShelf item. AudioBookShelf only re-reads an item when its files are renamed, so without this it keeps whatever it was first scanned with")]
         public bool PushLibraryEdits { get; set; }
-
-        [FieldDefinition(5, Type = FieldType.Textbox, Hidden = HiddenType.Hidden)]
-        public string LibraryMappingsJson { get; set; }
 
         [FieldDefinition(9, Label = "Authenticate with AudioBookShelf (OIDC)", Type = FieldType.OAuth, Hidden = HiddenType.Hidden, HelpText = "Uses AudioBookShelf OpenID Connect (SSO) to generate an API key automatically. This will open a browser popup to the configured AudioBookShelf URL, so it must be reachable from your browser. Your AudioBookShelf server must allow this app's callback URL under OpenID Connect → Mobile Redirect URIs.")]
         public string SignIn { get; set; }

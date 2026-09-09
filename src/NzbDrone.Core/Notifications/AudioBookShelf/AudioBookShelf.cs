@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -302,8 +303,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
         public bool AcceptsExternalLibraryEdits => Settings.PushLibraryEdits;
 
-        // Applies an edit made in another library service (e.g. Grimmory) to the matching
-        // items. Title stays Chaptarr's, mirroring the calibre forwarder's identity rule.
+        // Title stays Chaptarr's, matching the calibre forwarder's identity rule.
         public void PushExternalLibraryEdit(Book book, List<BookFile> files, ExternalLibraryEditPayload payload)
         {
             if (book == null || payload == null || files == null || files.Count == 0)
@@ -324,7 +324,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 Description = payload.Description,
                 Publisher = payload.Publisher,
                 SeriesName = payload.SeriesName,
-                SeriesPosition = payload.SeriesPosition?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
+                SeriesPosition = payload.SeriesPosition?.ToString("0.##", CultureInfo.InvariantCulture),
                 Genres = payload.Genres
             };
 
@@ -386,16 +386,13 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
             if (pushedCover)
             {
-                // Regenerate resized thumbnails from the refreshed covers.
                 _proxy.PurgeCoverCache(Settings);
             }
         }
 
         public void PushBooksMetadata(List<(Book Book, List<BookFile> Files)> books)
         {
-            var pushable = (books ?? new List<(Book, List<BookFile>)>())
-                .Where(x => x.Book != null && x.Files != null && x.Files.Count > 0)
-                .ToList();
+            var pushable = books.Where(x => x.Files.Count > 0).ToList();
 
             if (pushable.Count == 0)
             {
@@ -527,8 +524,6 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             {
                 _proxy.UpdateItemCover(settings, itemId, remoteCover);
                 _logger.Debug("AudioBookShelf: set item cover from '{0}'", remoteCover);
-
-                // Regenerate resized thumbnails from the refreshed cover.
                 _proxy.PurgeCoverCache(settings);
             }
             catch (Exception ex)

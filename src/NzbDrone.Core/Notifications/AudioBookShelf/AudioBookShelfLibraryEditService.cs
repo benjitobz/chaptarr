@@ -34,7 +34,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
         public void Handle(MediaCoversUpdatedEvent message)
         {
-            Author author = message.Author;
+            var author = message.Author;
 
             if (author == null && message.Book != null)
             {
@@ -106,7 +106,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 return Array.Empty<Book>();
             }
 
-            return _bookService.GetBooksByAuthor(author.Id).Where(b => b != null && b.Id > 0);
+            return _bookService.GetBooksByAuthor(author.Id).Where(b => b.Id > 0);
         }
     }
 }

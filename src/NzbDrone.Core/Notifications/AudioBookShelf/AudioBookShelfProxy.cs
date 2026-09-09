@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using FluentValidation.Results;
 using NLog;
@@ -106,12 +107,12 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
         public void RemoveItemsWithIssues(AudioBookShelfSettings settings, string libraryId)
         {
-            if (string.IsNullOrEmpty(libraryId))
+            if (libraryId.IsNullOrWhiteSpace())
             {
                 return;
             }
 
-            // ABS marks deleted books missing; this purges items whose files are gone.
+            // AudioBookShelf marks the items missing rather than removing them.
             var request = BuildRequest(settings, $"/api/libraries/{libraryId}/issues");
             request.Method = HttpMethod.Delete;
 
@@ -230,7 +231,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
         public void ScanItem(AudioBookShelfSettings settings, string itemId)
         {
-            if (string.IsNullOrEmpty(itemId))
+            if (itemId.IsNullOrWhiteSpace())
             {
                 return;
             }
@@ -248,7 +249,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
         public void UpdateItemMetadata(AudioBookShelfSettings settings, string itemId, AudioBookShelfItemMetadata item)
         {
-            if (string.IsNullOrEmpty(itemId) || item == null)
+            if (itemId.IsNullOrWhiteSpace() || item == null)
             {
                 return;
             }
@@ -303,7 +304,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
         public void UpdateItemCover(AudioBookShelfSettings settings, string itemId, string coverPath)
         {
-            if (string.IsNullOrEmpty(itemId) || string.IsNullOrEmpty(coverPath))
+            if (itemId.IsNullOrWhiteSpace() || coverPath.IsNullOrWhiteSpace())
             {
                 return;
             }
@@ -321,21 +322,14 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             }
         }
 
-        private class AudioBookShelfLibraryItemsResponse
-        {
-            public List<AudioBookShelfLibraryItemSummary> Results { get; set; }
-        }
-
-        // For covers a target cannot fetch itself (e.g. behind another service's auth) the
-        // image bytes are uploaded directly instead of handing AudioBookShelf a URL to pull.
         public void UploadItemCover(AudioBookShelfSettings settings, string itemId, byte[] image, string fileName)
         {
-            if (string.IsNullOrEmpty(itemId) || image == null || image.Length == 0)
+            if (itemId.IsNullOrWhiteSpace() || image == null || image.Length == 0)
             {
                 return;
             }
 
-            var extension = System.IO.Path.GetExtension(fileName)?.ToLowerInvariant();
+            var extension = Path.GetExtension(fileName)?.ToLowerInvariant();
             var contentType = extension switch
             {
                 ".png" => "image/png",
@@ -364,10 +358,8 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
         public void PurgeCoverCache(AudioBookShelfSettings settings)
         {
-            // Updating an item's cover from the same path does not invalidate the
-            // server-side resized thumbnail cache (/metadata/cache/covers/*_400.webp),
-            // so the library grid keeps showing the old art. Purge the cache so the
-            // thumbnails regenerate from the refreshed covers.
+            // Re-pointing an item at the same cover path leaves the server-side resized
+            // thumbnails (/metadata/cache/covers/*_400.webp) showing the old art.
             try
             {
                 var request = BuildRequest(settings, "/api/cache/purge");
@@ -386,6 +378,11 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             {
                 _logger.Debug(ex, "AudioBookShelf: cover cache purge failed");
             }
+        }
+
+        private class AudioBookShelfLibraryItemsResponse
+        {
+            public List<AudioBookShelfLibraryItemSummary> Results { get; set; }
         }
 
         private HttpRequest BuildRequest(AudioBookShelfSettings settings, string resource)
