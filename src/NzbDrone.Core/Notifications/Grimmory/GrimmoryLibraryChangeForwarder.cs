@@ -29,7 +29,11 @@ namespace NzbDrone.Core.Notifications.Grimmory
         IHandle<ProviderUpdatedEvent<INotification>>,
         IDisposable
     {
-        private static readonly TimeSpan DebounceDelay = TimeSpan.FromSeconds(30);
+        // Long enough that a target's own reaction to the same edit settles first: with
+        // save-to-original-file enabled Grimmory rewrites the book alongside the sidecar, and
+        // AudioBookShelf rescans the rewritten file ~30s later, rebuilding item metadata - a
+        // push that lands before that rescan is silently overwritten by it.
+        private static readonly TimeSpan DebounceDelay = TimeSpan.FromSeconds(90);
         private static readonly string[] SidecarSuffixes = { ".metadata.json", ".cover.jpg" };
 
         private readonly INotificationFactory _notificationFactory;
