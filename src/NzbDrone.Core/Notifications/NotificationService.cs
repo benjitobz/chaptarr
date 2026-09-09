@@ -376,37 +376,14 @@ namespace NzbDrone.Core.Notifications
                 return;
             }
 
-            Book book = null;
-
-            try
-            {
-                book = bookFile.Edition?.Book;
-            }
-            catch (Exception ex)
-            {
-                _logger.Debug(ex, "Unable to read the edition for {0}", bookFile.Path);
-            }
-
-            if (book == null)
-            {
-                book = _editionService.GetEdition(bookFile.EditionId)?.Book;
-            }
+            var book = bookFile.Edition?.Book ?? _editionService.GetEdition(bookFile.EditionId)?.Book;
 
             if (book == null)
             {
                 return;
             }
 
-            Author author = null;
-
-            try
-            {
-                author = book.Author ?? bookFile.Author;
-            }
-            catch (Exception ex)
-            {
-                _logger.Debug(ex, "Unable to resolve the author for {0}", bookFile.Path);
-            }
+            var author = book.Author ?? bookFile.Author;
 
             foreach (var notification in _notificationFactory.OnReleaseImportEnabled())
             {

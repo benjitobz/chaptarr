@@ -14,6 +14,7 @@ using NzbDrone.Common.Serializer;
 using NzbDrone.Core.Books;
 using NzbDrone.Core.Books.Calibre;
 using NzbDrone.Core.MediaCover;
+using NzbDrone.Core.MediaFiles;
 using NzbDrone.Core.Qualities;
 using NzbDrone.Core.RootFolders;
 
@@ -71,7 +72,7 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
             }
         }
 
-        private void RemoveReplacedFormats(int calibreId, List<NzbDrone.Core.MediaFiles.BookFile> oldFiles, List<NzbDrone.Core.MediaFiles.BookFile> newFiles)
+        private void RemoveReplacedFormats(int calibreId, List<BookFile> oldFiles, List<BookFile> newFiles)
         {
             var newExtensions = newFiles
                 .Select(f => (Path.GetExtension(f?.Path) ?? string.Empty).TrimStart('.'))
@@ -125,7 +126,7 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
             }
         }
 
-        public override void OnLibraryFileAdded(NzbDrone.Core.MediaFiles.BookFile bookFile, Book book)
+        public override void OnLibraryFileAdded(BookFile bookFile, Book book)
         {
             if (!QualityMediaTypeHelper.IsEbookFileQuality(bookFile.Quality.Quality))
             {
@@ -142,11 +143,9 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
 
         public bool AcceptsExternalLibraryEdits => Settings.PushLibraryEdits;
 
-        // Applies an edit made in another library service (e.g. Grimmory) to the mirror
-        // record. Title and authors stay Chaptarr's - only the descriptive fields mirror the
-        // editing library, matching the calibre forwarder's identity rule. The changes dict is
-        // built by hand so absent fields are omitted rather than erased on the mirror.
-        public void PushExternalLibraryEdit(Book book, List<NzbDrone.Core.MediaFiles.BookFile> files, ExternalLibraryEditPayload payload)
+        // Title and authors stay Chaptarr's, matching the calibre forwarder's identity rule,
+        // and absent payload fields are left out so the mirror keeps what it already has.
+        public void PushExternalLibraryEdit(Book book, List<BookFile> files, ExternalLibraryEditPayload payload)
         {
             if (book == null || payload == null)
             {
@@ -233,7 +232,7 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
             _logger.Debug("Forwarded external library edit of '{0}' to content server book {1}", book.Title, mirrorId);
         }
 
-        public bool RePush(Book book, List<NzbDrone.Core.MediaFiles.BookFile> files, bool metadataOnly = false)
+        public bool RePush(Book book, List<BookFile> files, bool metadataOnly = false)
         {
             try
             {
@@ -465,9 +464,21 @@ namespace NzbDrone.Core.Notifications.CalibreContentServer
                 var edition = book?.Editions?.FirstOrDefault(e => e.Monitored) ?? book?.Editions?.FirstOrDefault();
 
                 var identifiers = new Dictionary<string, string>();
-                if (edition?.Isbn13.IsNotNullOrWhiteSpace() == true) { identifiers["isbn"] = edition.Isbn13; }
-                if (edition?.Asin.IsNotNullOrWhiteSpace() == true) { identifiers["asin"] = edition.Asin; }
-                if (edition?.ForeignEditionId.IsNotNullOrWhiteSpace() == true) { identifiers["goodreads"] = edition.ForeignEditionId; }
+
+                if (edition?.Isbn13.IsNotNullOrWhiteSpace() == true)
+                {
+                    identifiers["isbn"] = edition.Isbn13;
+                }
+
+                if (edition?.Asin.IsNotNullOrWhiteSpace() == true)
+                {
+                    identifiers["asin"] = edition.Asin;
+                }
+
+                if (edition?.ForeignEditionId.IsNotNullOrWhiteSpace() == true)
+                {
+                    identifiers["goodreads"] = edition.ForeignEditionId;
+                }
 
                 var payload = new CalibreChangesPayload
                 {

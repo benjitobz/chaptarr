@@ -7,8 +7,8 @@ using NzbDrone.Core.Books;
 using NzbDrone.Core.MediaCover;
 using NzbDrone.Core.MediaFiles;
 using NzbDrone.Core.Messaging.Commands;
-using NzbDrone.Core.Qualities;
 using NzbDrone.Core.Messaging.Events;
+using NzbDrone.Core.Qualities;
 
 namespace NzbDrone.Core.Notifications.CalibreContentServer
 {

@@ -95,7 +95,7 @@ namespace NzbDrone.Core.Notifications
         {
         }
 
-        public virtual void OnLibraryFileAdded(NzbDrone.Core.MediaFiles.BookFile bookFile, NzbDrone.Core.Books.Book book)
+        public virtual void OnLibraryFileAdded(BookFile bookFile, Book book)
         {
         }
 
