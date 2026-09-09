@@ -212,6 +212,11 @@ namespace NzbDrone.Core.Notifications.Grimmory
                 if (metadata.Any())
                 {
                     _proxy.UpdateBookMetadata(settings, grimmoryBook.Id, metadata);
+
+                    // Only a metadata update makes Grimmory rewrite the sidecar, so only then
+                    // is there an echo for the forwarder to consume. A cover-only push leaves
+                    // no registry entry that could swallow the person's next edit.
+                    GrimmoryPushRegistry.RecordPush(book.Id);
                 }
 
                 if (fields.Contains("cover", StringComparer.OrdinalIgnoreCase))
@@ -221,7 +226,6 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
                 _logger.Debug("Pushed '{0}' to Grimmory book {1} on {2}", book.Title, grimmoryBook.Id, settings.Url);
                 anyPushed = true;
-                GrimmoryPushRegistry.RecordPush(book.Id);
             }
 
             return anyPushed;

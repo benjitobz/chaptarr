@@ -236,6 +236,21 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
         }
 
         [Test]
+        public void should_not_record_cover_only_push_in_registry()
+        {
+            var context = CreateContext();
+            context.Proxy.BooksByPath["Robin Hobb/Assassin's Apprentice/Assassin's Apprentice.epub"] = GrimmoryBookAt("Robin Hobb/Assassin's Apprentice/Assassin's Apprentice.epub");
+
+            context.Service.Execute(new PushGrimmoryMetadataCommand
+            {
+                BookIds = new List<int> { 10 },
+                Fields = new List<string> { "cover" }
+            });
+
+            Assert.That(GrimmoryPushRegistry.WasRecentlyPushed(10), Is.False);
+        }
+
+        [Test]
         public void should_skip_when_book_not_found_in_grimmory()
         {
             var context = CreateContext();
