@@ -328,6 +328,8 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                 Genres = payload.Genres
             };
 
+            var pushedCover = false;
+
             foreach (var libraryId in MappedLibraryIds(mappings))
             {
                 List<AudioBookShelfLibraryItemSummary> items;
@@ -365,10 +367,12 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                         if (payload.CoverBytes?.Length > 0)
                         {
                             _proxy.UploadItemCover(Settings, item.Id, payload.CoverBytes, "cover.jpg");
+                            pushedCover = true;
                         }
                         else if (payload.CoverUrl.IsNotNullOrWhiteSpace())
                         {
                             _proxy.UpdateItemCover(Settings, item.Id, payload.CoverUrl);
+                            pushedCover = true;
                         }
 
                         _logger.Debug("AudioBookShelf: forwarded external edit for '{0}'", resolved.Value.RelativePath);
@@ -378,6 +382,12 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                         _logger.Debug(ex, "AudioBookShelf: external edit push failed for '{0}'", resolved.Value.RelativePath);
                     }
                 }
+            }
+
+            if (pushedCover)
+            {
+                // Regenerate resized thumbnails from the refreshed covers.
+                _proxy.PurgeCoverCache(Settings);
             }
         }
 
@@ -517,6 +527,9 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             {
                 _proxy.UpdateItemCover(settings, itemId, remoteCover);
                 _logger.Debug("AudioBookShelf: set item cover from '{0}'", remoteCover);
+
+                // Regenerate resized thumbnails from the refreshed cover.
+                _proxy.PurgeCoverCache(settings);
             }
             catch (Exception ex)
             {

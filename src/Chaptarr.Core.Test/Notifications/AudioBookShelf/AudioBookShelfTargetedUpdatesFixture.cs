@@ -409,6 +409,7 @@ namespace Chaptarr.Core.Test.Notifications.AudioBookShelf
             public void UpdateItemMetadata(AudioBookShelfSettings settings, string itemId, AudioBookShelfItemMetadata metadata) { }
             public void UpdateItemCover(AudioBookShelfSettings settings, string itemId, string coverPath) { }
             public void UploadItemCover(AudioBookShelfSettings settings, string itemId, byte[] image, string fileName) { }
+            public void PurgeCoverCache(AudioBookShelfSettings settings) { }
             public void RemoveItemsWithIssues(AudioBookShelfSettings settings, string libraryId) { }
         }
 
