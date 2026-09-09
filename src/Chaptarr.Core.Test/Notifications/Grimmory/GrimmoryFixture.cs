@@ -204,6 +204,7 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             return new NzbDrone.Core.Notifications.Grimmory.Grimmory(
                 proxy,
                 DispatchProxy.Create<IManageCommandQueue, InertCommandQueueProxy>(),
+                null,
                 new CacheManager(),
                 LogManager.GetLogger("GrimmoryFixture"))
             {

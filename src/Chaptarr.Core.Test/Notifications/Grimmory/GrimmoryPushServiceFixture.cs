@@ -106,7 +106,7 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
                 return null;
             };
 
-            var provider = new NzbDrone.Core.Notifications.Grimmory.Grimmory(proxy, commandQueue, new CacheManager(), LogManager.GetLogger("test"))
+            var provider = new NzbDrone.Core.Notifications.Grimmory.Grimmory(proxy, commandQueue, null, new CacheManager(), LogManager.GetLogger("test"))
             {
                 Definition = new NotificationDefinition { Id = 1, Name = "Grimmory", Settings = settings }
             };

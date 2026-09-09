@@ -8,20 +8,23 @@ using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Books;
 using NzbDrone.Core.MediaFiles;
 using NzbDrone.Core.Messaging.Commands;
+using NzbDrone.Core.RootFolders;
 
 namespace NzbDrone.Core.Notifications.Grimmory
 {
-    public class Grimmory : NotificationBase<GrimmorySettings>
+    public class Grimmory : NotificationBase<GrimmorySettings>, IExternalLibraryEditTarget
     {
         private readonly IGrimmoryProxy _proxy;
         private readonly IManageCommandQueue _commandQueueManager;
+        private readonly IRootFolderService _rootFolderService;
         private readonly Logger _logger;
         private readonly ICached<GrimmoryUpdateQueue> _pendingLibrariesCache;
 
-        public Grimmory(IGrimmoryProxy proxy, IManageCommandQueue commandQueueManager, ICacheManager cacheManager, Logger logger)
+        public Grimmory(IGrimmoryProxy proxy, IManageCommandQueue commandQueueManager, IRootFolderService rootFolderService, ICacheManager cacheManager, Logger logger)
         {
             _proxy = proxy;
             _commandQueueManager = commandQueueManager;
+            _rootFolderService = rootFolderService;
             _logger = logger;
             _pendingLibrariesCache = cacheManager.GetRollingCache<GrimmoryUpdateQueue>(GetType(), "pendingLibraries", TimeSpan.FromDays(1));
         }
@@ -238,6 +241,101 @@ namespace NzbDrone.Core.Notifications.Grimmory
             }
 
             return new { };
+        }
+
+        public bool AcceptsExternalLibraryEdits => Settings.PushMetadata || Settings.PushCovers;
+
+        // Applies an edit made in another library service - typically a sibling Grimmory
+        // connection, since the forwarder excludes the source itself - so every instance
+        // converges on the same values. Identity fields stay Chaptarr's per the forwarder
+        // convention, locked fields on this instance keep winning, and the target rewrites
+        // its own sidecar in response, so the push is recorded to absorb that echo.
+        public void PushExternalLibraryEdit(Book book, List<BookFile> files, ExternalLibraryEditPayload payload)
+        {
+            if (book == null || payload == null || files == null || files.Empty())
+            {
+                return;
+            }
+
+            var libraryId = book.MediaType == BookMediaType.Ebook ? Settings.EbookLibraryId : Settings.AudiobookLibraryId;
+
+            if (libraryId <= 0)
+            {
+                return;
+            }
+
+            var grimmoryBook = files
+                .Select(f => GetRootRelativePath(f?.Path))
+                .Where(p => p.IsNotNullOrWhiteSpace())
+                .Select(p => _proxy.FindBookByPath(Settings, libraryId, p, bypassCache: true))
+                .FirstOrDefault(b => b != null);
+
+            if (grimmoryBook == null)
+            {
+                return;
+            }
+
+            var metadata = new Dictionary<string, object>();
+
+            if (Settings.PushMetadata)
+            {
+                void Add(string field, object value)
+                {
+                    if (value != null && (!(value is string s) || s.IsNotNullOrWhiteSpace()))
+                    {
+                        metadata[field] = value;
+                    }
+                }
+
+                Add("description", payload.Description);
+                Add("publisher", payload.Publisher);
+                Add("seriesName", payload.SeriesName);
+                Add("seriesNumber", payload.SeriesPosition);
+                Add("language", payload.Languages?.FirstOrDefault());
+                Add("isbn13", payload.Identifiers?.GetValueOrDefault("isbn"));
+                Add("asin", payload.Identifiers?.GetValueOrDefault("asin"));
+                Add("goodreadsId", payload.Identifiers?.GetValueOrDefault("goodreads"));
+
+                if (payload.PublishedDate.HasValue)
+                {
+                    metadata["publishedDate"] = payload.PublishedDate.Value.ToString("yyyy-MM-dd");
+                }
+
+                if (payload.Genres?.Any() == true)
+                {
+                    metadata["categories"] = payload.Genres;
+                }
+
+                if (metadata.Any())
+                {
+                    _proxy.UpdateBookMetadata(Settings, grimmoryBook.Id, metadata);
+                    GrimmoryPushRegistry.RecordPush(book.Id);
+                }
+            }
+
+            if (Settings.PushCovers && payload.CoverBytes?.Length > 0)
+            {
+                _proxy.UploadBookCover(Settings, grimmoryBook.Id, payload.CoverBytes, "cover.jpg");
+            }
+
+            _logger.Debug("Applied external library edit of '{0}' to Grimmory book {1} on {2}", book.Title, grimmoryBook.Id, Settings.Url);
+        }
+
+        private string GetRootRelativePath(string path)
+        {
+            if (path.IsNullOrWhiteSpace())
+            {
+                return null;
+            }
+
+            var rootFolder = _rootFolderService.GetBestRootFolder(path);
+
+            if (rootFolder?.Path == null || rootFolder.Path.PathEquals(path))
+            {
+                return null;
+            }
+
+            return rootFolder.Path.GetRelativePath(path);
         }
 
         private string QueueKey => $"{Settings.Url}:{Settings.Username}";
