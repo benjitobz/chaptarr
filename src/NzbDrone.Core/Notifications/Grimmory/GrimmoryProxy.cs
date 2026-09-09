@@ -20,7 +20,6 @@ namespace NzbDrone.Core.Notifications.Grimmory
         List<GrimmoryBook> GetLibraryBooks(GrimmorySettings settings, long libraryId, bool bypassCache = false);
         GrimmoryBook FindBookByPath(GrimmorySettings settings, long libraryId, string relativePath, bool bypassCache = false);
         void UpdateBookMetadata(GrimmorySettings settings, long bookId, Dictionary<string, object> metadata);
-        void UnlockBookFields(GrimmorySettings settings, long bookId, IEnumerable<string> lockFieldNames);
         void UploadBookCover(GrimmorySettings settings, long bookId, byte[] image, string fileName);
         byte[] GetBookCover(GrimmorySettings settings, long bookId);
         string BuildCoverUrl(GrimmorySettings settings, long bookId);
@@ -120,33 +119,6 @@ namespace NzbDrone.Core.Notifications.Grimmory
             });
 
             _logger.Debug("Updated Grimmory metadata for book {0}", bookId);
-        }
-
-        // Grimmory never writes a locked field, not even for the writer who locked it, and it
-        // applies a request's values before its lock flags - so a push that locks its fields
-        // must explicitly unlock them first or every later push silently keeps the old value.
-        public void UnlockBookFields(GrimmorySettings settings, long bookId, IEnumerable<string> lockFieldNames)
-        {
-            var fieldActions = lockFieldNames.Distinct().ToDictionary(f => f, _ => (object)"UNLOCK");
-
-            if (fieldActions.Count == 0)
-            {
-                return;
-            }
-
-            ExecuteWithAuth(settings, token =>
-            {
-                var request = BuildRequest(settings, "api/v1/books/metadata/toggle-field-locks", token).Build();
-                request.Method = HttpMethod.Put;
-                request.Headers.ContentType = "application/json";
-                request.SetContent(new Dictionary<string, object>
-                {
-                    { "bookIds", new List<long> { bookId } },
-                    { "fieldActions", fieldActions }
-                }.ToJson());
-
-                return _httpClient.Execute(request);
-            });
         }
 
         public void UploadBookCover(GrimmorySettings settings, long bookId, byte[] image, string fileName)

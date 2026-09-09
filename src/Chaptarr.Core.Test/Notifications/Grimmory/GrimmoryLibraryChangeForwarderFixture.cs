@@ -71,7 +71,6 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             }
 
             public void UpdateBookMetadata(GrimmorySettings settings, long bookId, Dictionary<string, object> metadata) { }
-            public void UnlockBookFields(GrimmorySettings settings, long bookId, IEnumerable<string> lockFieldNames) { }
             public void UploadBookCover(GrimmorySettings settings, long bookId, byte[] image, string fileName) { }
             public byte[] GetBookCover(GrimmorySettings settings, long bookId) => new byte[] { 9 };
             public string BuildCoverUrl(GrimmorySettings settings, long bookId) => $"http://grimmory/cover/{bookId}";

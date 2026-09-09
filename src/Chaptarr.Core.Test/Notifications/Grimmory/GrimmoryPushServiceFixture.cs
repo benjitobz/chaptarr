@@ -56,7 +56,6 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             public Dictionary<string, GrimmoryBook> BooksByPath { get; } = new Dictionary<string, GrimmoryBook>(StringComparer.OrdinalIgnoreCase);
             public List<(long BookId, Dictionary<string, object> Metadata)> MetadataUpdates { get; } = new List<(long, Dictionary<string, object>)>();
             public List<(long BookId, string FileName)> CoverUploads { get; } = new List<(long, string)>();
-            public List<(long BookId, List<string> Fields)> Unlocks { get; } = new List<(long, List<string>)>();
 
             public List<GrimmoryLibrary> GetLibraries(GrimmorySettings settings) => new List<GrimmoryLibrary>();
             public void RefreshLibrary(GrimmorySettings settings, long libraryId) { }
@@ -67,13 +66,7 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
                 return BooksByPath.TryGetValue(relativePath.Replace('\\', '/'), out var book) ? book : null;
             }
 
-            public void UpdateBookMetadata(GrimmorySettings settings, long bookId, Dictionary<string, object> metadata)
-            {
-                Assert.That(Unlocks.Any(u => u.BookId == bookId), Is.True, "fields must be unlocked before the metadata update");
-                MetadataUpdates.Add((bookId, metadata));
-            }
-
-            public void UnlockBookFields(GrimmorySettings settings, long bookId, IEnumerable<string> lockFieldNames) => Unlocks.Add((bookId, lockFieldNames.ToList()));
+            public void UpdateBookMetadata(GrimmorySettings settings, long bookId, Dictionary<string, object> metadata) => MetadataUpdates.Add((bookId, metadata));
             public void UploadBookCover(GrimmorySettings settings, long bookId, byte[] image, string fileName) => CoverUploads.Add((bookId, fileName));
             public byte[] GetBookCover(GrimmorySettings settings, long bookId) => null;
             public string BuildCoverUrl(GrimmorySettings settings, long bookId) => $"http://grimmory/cover/{bookId}";
@@ -224,9 +217,6 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
                 Assert.That(metadata["isbn13Locked"], Is.True);
                 Assert.That(metadata.ContainsKey("publisher"), Is.False);
             });
-
-            Assert.That(context.Proxy.Unlocks, Has.Count.EqualTo(1));
-            Assert.That(context.Proxy.Unlocks[0].Fields, Is.EquivalentTo(new[] { "titleLocked", "descriptionLocked", "isbn13Locked" }));
         }
 
         [Test]

@@ -248,7 +248,6 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             public List<GrimmoryBook> GetLibraryBooks(GrimmorySettings settings, long libraryId, bool bypassCache = false) => new List<GrimmoryBook>();
             public GrimmoryBook FindBookByPath(GrimmorySettings settings, long libraryId, string relativePath, bool bypassCache = false) => null;
             public void UpdateBookMetadata(GrimmorySettings settings, long bookId, Dictionary<string, object> metadata) { }
-            public void UnlockBookFields(GrimmorySettings settings, long bookId, IEnumerable<string> lockFieldNames) { }
             public void UploadBookCover(GrimmorySettings settings, long bookId, byte[] image, string fileName) { }
             public byte[] GetBookCover(GrimmorySettings settings, long bookId) => null;
             public string BuildCoverUrl(GrimmorySettings settings, long bookId) => string.Empty;

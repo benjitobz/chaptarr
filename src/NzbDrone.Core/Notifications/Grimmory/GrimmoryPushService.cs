@@ -211,7 +211,9 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
                 if (metadata.Any())
                 {
-                    _proxy.UnlockBookFields(settings, grimmoryBook.Id, metadata.Keys.Where(k => k.EndsWith("Locked", StringComparison.Ordinal)));
+                    // Locked fields are deliberately left alone: Grimmory skips them even for
+                    // the writer that locked them, so a re-push only lands on fields someone
+                    // has unlocked in Grimmory (or never locked). Locks stay authoritative.
                     _proxy.UpdateBookMetadata(settings, grimmoryBook.Id, metadata);
 
                     // Only a metadata update makes Grimmory rewrite the sidecar, so only then
