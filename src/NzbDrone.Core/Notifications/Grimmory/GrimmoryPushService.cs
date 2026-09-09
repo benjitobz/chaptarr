@@ -211,15 +211,16 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
                 if (metadata.Any())
                 {
+                    // Recorded before the update: Grimmory writes the sidecar during the call,
+                    // so the filesystem event can reach the forwarder before the call returns.
+                    // Only a metadata update makes Grimmory rewrite the sidecar - a cover-only
+                    // push leaves no entry that could swallow the person's next edit.
+                    GrimmoryPushRegistry.RecordPush(book.Id);
+
                     // Locked fields are deliberately left alone: Grimmory skips them even for
                     // the writer that locked them, so a re-push only lands on fields someone
                     // has unlocked in Grimmory (or never locked). Locks stay authoritative.
                     _proxy.UpdateBookMetadata(settings, grimmoryBook.Id, metadata);
-
-                    // Only a metadata update makes Grimmory rewrite the sidecar, so only then
-                    // is there an echo for the forwarder to consume. A cover-only push leaves
-                    // no registry entry that could swallow the person's next edit.
-                    GrimmoryPushRegistry.RecordPush(book.Id);
                 }
 
                 if (fields.Contains("cover", StringComparer.OrdinalIgnoreCase))

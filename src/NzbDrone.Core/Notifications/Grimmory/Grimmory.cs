@@ -308,8 +308,10 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
                 if (metadata.Any())
                 {
-                    _proxy.UpdateBookMetadata(Settings, grimmoryBook.Id, metadata);
+                    // Recorded before the update so the target's sidecar rewrite, which can
+                    // reach the forwarder before this call returns, is absorbed as an echo.
                     GrimmoryPushRegistry.RecordPush(book.Id);
+                    _proxy.UpdateBookMetadata(Settings, grimmoryBook.Id, metadata);
                 }
             }
 
