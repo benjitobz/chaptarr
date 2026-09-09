@@ -211,6 +211,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
                 if (metadata.Any())
                 {
+                    _proxy.UnlockBookFields(settings, grimmoryBook.Id, metadata.Keys.Where(k => k.EndsWith("Locked", StringComparison.Ordinal)));
                     _proxy.UpdateBookMetadata(settings, grimmoryBook.Id, metadata);
 
                     // Only a metadata update makes Grimmory rewrite the sidecar, so only then
@@ -307,9 +308,11 @@ namespace NzbDrone.Core.Notifications.Grimmory
             Add("publisher", "publisher", edition?.Publisher);
             Add("language", "language", edition?.Language);
 
-            if (wanted.Contains("publisheddate") && book.ReleaseDate.HasValue && book.ReleaseDate.Value > DateTime.MinValue)
+            var releaseDate = edition?.ReleaseDate ?? book.ReleaseDate;
+
+            if (wanted.Contains("publisheddate") && releaseDate.HasValue && releaseDate.Value > DateTime.MinValue)
             {
-                metadata["publishedDate"] = book.ReleaseDate.Value.ToString("yyyy-MM-dd");
+                metadata["publishedDate"] = releaseDate.Value.ToString("yyyy-MM-dd");
                 metadata["publishedDateLocked"] = true;
             }
 
