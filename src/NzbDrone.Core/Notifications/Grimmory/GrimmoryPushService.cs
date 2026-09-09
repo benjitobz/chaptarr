@@ -82,9 +82,8 @@ namespace NzbDrone.Core.Notifications.Grimmory
             return fields;
         }
 
-        // Fires when a book's cover/metadata is updated in Chaptarr (e.g. through the UI).
-        // Author-scoped cover events are deliberately ignored - they fire during routine
-        // author refreshes and would fan out into pushes for every book of the author.
+        // Author-scoped cover events are ignored: they fire during routine author refreshes
+        // and would fan out into a push for every book of the author.
         public void Handle(MediaCoversUpdatedEvent message)
         {
             var book = message.Book;
@@ -186,7 +185,8 @@ namespace NzbDrone.Core.Notifications.Grimmory
             }
 
             var author = _authorService.GetAuthor(book.AuthorId);
-            var edition = ResolveEdition(book);
+            var editions = _editionService.GetEditionsByBook(book.Id);
+            var edition = editions.FirstOrDefault(e => e.Monitored) ?? editions.FirstOrDefault();
             var anyPushed = false;
 
             foreach (var connection in connections)
@@ -211,15 +211,12 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
                 if (metadata.Any())
                 {
-                    // Recorded before the update: Grimmory writes the sidecar during the call,
-                    // so the filesystem event can reach the forwarder before the call returns.
-                    // Only a metadata update makes Grimmory rewrite the sidecar - a cover-only
-                    // push leaves no entry that could swallow the person's next edit.
+                    // Only a metadata update makes Grimmory rewrite the sidecar, and it writes
+                    // it during the call, so the entry has to exist before the call.
                     GrimmoryPushRegistry.RecordPush(book.Id);
 
-                    // Locked fields are deliberately left alone: Grimmory skips them even for
-                    // the writer that locked them, so a re-push only lands on fields someone
-                    // has unlocked in Grimmory (or never locked). Locks stay authoritative.
+                    // Grimmory skips locked fields even for the writer that locked them, so a
+                    // re-push only lands on fields someone has unlocked there.
                     _proxy.UpdateBookMetadata(settings, grimmoryBook.Id, metadata);
                 }
 
@@ -264,8 +261,8 @@ namespace NzbDrone.Core.Notifications.Grimmory
                     return null;
                 }
 
-                // Freshly imported books only exist in Grimmory once its (async) refresh has
-                // scanned them, so re-fetch the library list until the book shows up.
+                // A freshly imported book only exists in Grimmory once its async refresh has
+                // scanned it, so re-fetch until it shows up.
                 Thread.Sleep(WaitForBookInterval);
                 bypassCache = true;
             }
@@ -281,13 +278,6 @@ namespace NzbDrone.Core.Notifications.Grimmory
             }
 
             return rootFolder.Path.GetRelativePath(path);
-        }
-
-        private Edition ResolveEdition(Book book)
-        {
-            var editions = _editionService.GetEditionsByBook(book.Id);
-
-            return editions.FirstOrDefault(e => e.Monitored) ?? editions.FirstOrDefault();
         }
 
         private Dictionary<string, object> BuildMetadata(Book book, Author author, Edition edition, List<string> fields)

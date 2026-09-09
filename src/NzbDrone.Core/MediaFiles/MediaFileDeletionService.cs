@@ -306,8 +306,8 @@ namespace NzbDrone.Core.MediaFiles
                 CleanupEmptyFolders(author, folder);
             }
 
-            // Notification providers queue work on OnBookDelete and drain it when this event
-            // signals the files are actually off the disk; author deletes already publish it.
+            // Providers queue work on OnBookDelete and drain it on this event; author
+            // deletes already publish it.
             _eventAggregator.PublishEvent(new DeleteCompletedEvent());
         }
 

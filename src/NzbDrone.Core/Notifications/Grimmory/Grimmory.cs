@@ -245,11 +245,6 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
         public bool AcceptsExternalLibraryEdits => Settings.PushMetadata || Settings.PushCovers;
 
-        // Applies an edit made in another library service - typically a sibling Grimmory
-        // connection, since the forwarder excludes the source itself - so every instance
-        // converges on the same values. Identity fields stay Chaptarr's per the forwarder
-        // convention, locked fields on this instance keep winning, and the target rewrites
-        // its own sidecar in response, so the push is recorded to absorb that echo.
         public void PushExternalLibraryEdit(Book book, List<BookFile> files, ExternalLibraryEditPayload payload)
         {
             if (book == null || payload == null || files == null || files.Empty())
@@ -308,8 +303,8 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
                 if (metadata.Any())
                 {
-                    // Recorded before the update so the target's sidecar rewrite, which can
-                    // reach the forwarder before this call returns, is absorbed as an echo.
+                    // Grimmory writes the sidecar during the update, so the entry has to
+                    // exist before the call for the forwarder to absorb the echo.
                     GrimmoryPushRegistry.RecordPush(book.Id);
                     _proxy.UpdateBookMetadata(Settings, grimmoryBook.Id, metadata);
                 }

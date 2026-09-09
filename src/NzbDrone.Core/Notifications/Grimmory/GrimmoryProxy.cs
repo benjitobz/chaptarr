@@ -17,7 +17,6 @@ namespace NzbDrone.Core.Notifications.Grimmory
     {
         List<GrimmoryLibrary> GetLibraries(GrimmorySettings settings);
         void RefreshLibrary(GrimmorySettings settings, long libraryId);
-        List<GrimmoryBook> GetLibraryBooks(GrimmorySettings settings, long libraryId, bool bypassCache = false);
         GrimmoryBook FindBookByPath(GrimmorySettings settings, long libraryId, string relativePath, bool bypassCache = false);
         void UpdateBookMetadata(GrimmorySettings settings, long bookId, Dictionary<string, object> metadata);
         void UploadBookCover(GrimmorySettings settings, long bookId, byte[] image, string fileName);
@@ -67,7 +66,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
             _logger.Debug("Triggered Grimmory refresh for library {0}", libraryId);
         }
 
-        public List<GrimmoryBook> GetLibraryBooks(GrimmorySettings settings, long libraryId, bool bypassCache = false)
+        private List<GrimmoryBook> GetLibraryBooks(GrimmorySettings settings, long libraryId, bool bypassCache)
         {
             var cacheKey = $"{settings.Url}:{settings.Username}:{libraryId}";
 
@@ -176,7 +175,6 @@ namespace NzbDrone.Core.Notifications.Grimmory
                 {
                     return new ValidationFailure(nameof(GrimmorySettings.AudiobookLibraryId), "The selected audiobook library was not found in Grimmory");
                 }
-
             }
             catch (GrimmoryAuthenticationException)
             {
@@ -280,8 +278,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
         private static HttpRequestBuilder BuildRequest(GrimmorySettings settings, string relativePath, string token)
         {
-            // Status codes are handled in ExecuteWithAuth so a 401/403 can trigger a re-login
-            // instead of surfacing as an HttpException from the client.
+            // SuppressHttpError so ExecuteWithAuth sees a 401/403 and can re-login.
             return new HttpRequestBuilder(HttpUri.CombinePath(settings.Url, relativePath))
             {
                 SuppressHttpError = true

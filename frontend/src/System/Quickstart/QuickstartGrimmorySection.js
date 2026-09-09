@@ -25,7 +25,6 @@ class QuickstartGrimmorySection extends Component {
   }
 
   componentDidMount() {
-    // Pre-fetch the schema so it's ready when user clicks
     if (!this.props.notificationsState.isSchemaPopulated) {
       this.props.fetchNotificationSchema();
     }
@@ -61,7 +60,6 @@ class QuickstartGrimmorySection extends Component {
     } = this.props;
 
     if (grimmoryNotification) {
-      // Edit existing Grimmory notification
       this.setState({
         isEditNotificationModalOpen: true,
         schemaSelectionError: false
@@ -112,8 +110,6 @@ class QuickstartGrimmorySection extends Component {
       schemaSelectionError: false
     });
 
-    // Refresh notifications to ensure we have the latest state
-    // This will update the button text and state after deletion
     if (this.props.fetchNotifications) {
       this.props.fetchNotifications();
     }
@@ -141,7 +137,6 @@ class QuickstartGrimmorySection extends Component {
   };
 
   onTestConnectionSuccess = () => {
-    // Mark this section as interacted when test connection succeeds
     const { markSectionInteracted } = this.props;
     if (markSectionInteracted) {
       markSectionInteracted({ section: 'grimmory' });

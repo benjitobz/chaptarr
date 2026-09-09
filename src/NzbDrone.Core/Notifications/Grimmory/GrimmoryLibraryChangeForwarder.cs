@@ -15,24 +15,17 @@ using NzbDrone.Core.ThingiProvider.Events;
 
 namespace NzbDrone.Core.Notifications.Grimmory
 {
-    // Forwards metadata and cover edits made in Grimmory to connections that implement
-    // IExternalLibraryEditTarget. Grimmory's database is remote, but with sidecar
-    // write-on-update enabled it rewrites "<book>.metadata.json" (and, when configured,
-    // "<book>.cover.jpg") next to the book after every edit - so, like the calibre forwarder
-    // watching metadata.db, watching the root folders for sidecar writes is the change
-    // signal. No polling. Chaptarr's own pushes also rewrite the sidecar; those are filtered
-    // through GrimmoryPushRegistry rather than by author, so edits a person makes in Grimmory
-    // are forwarded even when they use the connection's own account.
+    // Grimmory's database is remote, but with sidecar write-on-update enabled it rewrites
+    // "<book>.metadata.json" (and "<book>.cover.jpg") next to the book after every edit, so
+    // watching the root folders is the only change signal available.
     public class GrimmoryLibraryChangeForwarder :
         IHandle<ApplicationStartedEvent>,
         IHandle<ModelEvent<RootFolder>>,
         IHandle<ProviderUpdatedEvent<INotification>>,
         IDisposable
     {
-        // Long enough that a target's own reaction to the same edit settles first: with
-        // save-to-original-file enabled Grimmory rewrites the book alongside the sidecar, and
-        // AudioBookShelf rescans the rewritten file ~30s later, rebuilding item metadata - a
-        // push that lands before that rescan is silently overwritten by it.
+        // With save-to-original-file enabled Grimmory rewrites the book alongside the sidecar
+        // and AudioBookShelf rescans it ~30s later, overwriting anything pushed before that.
         private static readonly TimeSpan DebounceDelay = TimeSpan.FromSeconds(90);
         private static readonly string[] SidecarSuffixes = { ".metadata.json", ".cover.jpg" };
 

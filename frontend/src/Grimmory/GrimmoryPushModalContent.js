@@ -17,7 +17,7 @@ const grimmoryFields = [
   { name: 'series', label: 'Series' },
   { name: 'description', label: 'Description' },
   { name: 'publisher', label: 'Publisher' },
-  { name: 'publisheddate', label: 'Publish Date' },
+  { name: 'publisheddate', label: 'PublishedDate' },
   { name: 'language', label: 'Language' },
   { name: 'tags', label: 'Tags' },
   { name: 'identifiers', label: 'Identifiers' }
@@ -93,7 +93,7 @@ class GrimmoryPushModalContent extends Component {
                       onChange={this.onFieldChange}
                     />
                   </div>
-                  <div className={styles.label}>{field.label}</div>
+                  <div className={styles.label}>{translate(field.label)}</div>
                   <div className={styles.value}>{preview}</div>
                 </div>
               );

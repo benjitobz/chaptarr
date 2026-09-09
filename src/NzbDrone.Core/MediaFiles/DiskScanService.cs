@@ -185,11 +185,8 @@ namespace NzbDrone.Core.MediaFiles
                     }
                     else if (!result.ScannedFilePaths.Any())
                     {
-                        // An empty result is ambiguous: a mount that dropped out from under the
-                        // scan, or files genuinely deleted (e.g. a book removed in an external
-                        // library app). For a subfolder of a root that provably still has content
-                        // it is the latter, and skipping would leave the pruned-on-disk book
-                        // tracked forever; only a root-level empty scan keeps the mount guard.
+                        // An empty result means either a dropped mount or a genuine delete;
+                        // only a root-level scan can still be a dropped mount.
                         var subfolderOfHealthyRoot = !rootFolder.Path.PathEquals(folder) &&
                             _diskProvider.FolderExists(rootFolder.Path) &&
                             _diskProvider.GetDirectories(rootFolder.Path).Any();

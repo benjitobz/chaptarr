@@ -59,7 +59,6 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
 
             public List<GrimmoryLibrary> GetLibraries(GrimmorySettings settings) => new List<GrimmoryLibrary>();
             public void RefreshLibrary(GrimmorySettings settings, long libraryId) { }
-            public List<GrimmoryBook> GetLibraryBooks(GrimmorySettings settings, long libraryId, bool bypassCache = false) => BooksByPath.Values.ToList();
 
             public GrimmoryBook FindBookByPath(GrimmorySettings settings, long libraryId, string relativePath, bool bypassCache = false)
             {

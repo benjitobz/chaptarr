@@ -9,8 +9,8 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
         public List<string> Fields { get; set; } = new List<string>();
 
-        // Set for pushes queued right after an import, when Grimmory may not have scanned the
-        // new files yet - the executor then waits for the book to appear before giving up.
+        // Grimmory's refresh is async, so a push queued right after an import has to wait
+        // for the book to appear.
         public bool WaitForBook { get; set; }
 
         public override bool SendUpdatesToClient => true;

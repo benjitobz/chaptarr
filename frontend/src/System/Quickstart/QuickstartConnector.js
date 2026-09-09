@@ -53,7 +53,6 @@ function createMapStateToProps() {
         notification.implementationName === 'AudioBookShelf'
       );
 
-      // Find first Grimmory notification
       const grimmoryNotification = notifications.find((notification) =>
         notification.implementationName === 'Grimmory'
       );
