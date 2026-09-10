@@ -69,11 +69,29 @@ namespace NzbDrone.Core.RootFolders
                 var hasAudiobookFiles = files.Any(IsAudiobookFile);
                 var hasEbookFiles = files.Any(IsEbookFile);
                 var relevantFiles = files.Where(f => IsRelevantFile(f, rootFolder)).ToList();
+                var audiobookSettings = _rootFolderSettingsResolver.ResolveSettings(rootFolder, BookMediaType.Audiobook);
+                var ebookSettings = _rootFolderSettingsResolver.ResolveSettings(rootFolder, BookMediaType.Ebook);
 
-                var rootCanLinkAudiobook = rootFolder.FolderType == FolderType.Audiobook ||
-                                           (rootFolder.FolderType == FolderType.Mixed && hasAudiobookFiles);
-                var rootCanLinkEbook = rootFolder.FolderType == FolderType.Ebook ||
-                                       (rootFolder.FolderType == FolderType.Mixed && hasEbookFiles);
+                var rootCanLinkAudiobook = audiobookSettings.IsConfigured &&
+                                           (rootFolder.FolderType == FolderType.Audiobook ||
+                                            (rootFolder.FolderType == FolderType.Mixed && hasAudiobookFiles));
+                var rootCanLinkEbook = ebookSettings.IsConfigured &&
+                                       (rootFolder.FolderType == FolderType.Ebook ||
+                                        (rootFolder.FolderType == FolderType.Mixed && hasEbookFiles));
+
+                if (!audiobookSettings.IsConfigured &&
+                    (rootFolder.FolderType == FolderType.Audiobook ||
+                     (rootFolder.FolderType == FolderType.Mixed && hasAudiobookFiles)))
+                {
+                    _logger.Warn($"Root folder '{rootFolder.Path}' has incomplete audiobook profile defaults; skipping the audiobook side for author '{author.Name}'");
+                }
+
+                if (!ebookSettings.IsConfigured &&
+                    (rootFolder.FolderType == FolderType.Ebook ||
+                     (rootFolder.FolderType == FolderType.Mixed && hasEbookFiles)))
+                {
+                    _logger.Warn($"Root folder '{rootFolder.Path}' has incomplete ebook profile defaults; skipping the ebook side for author '{author.Name}'");
+                }
 
                 var shouldLinkAudiobook = rootCanLinkAudiobook &&
                                           CanLinkMediaPath(author.AudiobookRootFolderPath, author.AudiobookPath, rootFolder);
@@ -124,25 +142,15 @@ namespace NzbDrone.Core.RootFolders
                         author.Path = folderPath;
                     }
 
-                    // Apply root folder defaults ONLY if not already set
-                    // This handles the case where author was imported via ebooks first
-                    if (!author.AudiobookQualityProfileId.HasValue)
-                    {
-                        var settings = _rootFolderSettingsResolver.ResolveSettings(rootFolder, BookMediaType.Audiobook);
-                        if (settings.IsConfigured)
-                        {
-                            author.AudiobookQualityProfileId = settings.QualityProfileId;
-                            author.AudiobookMetadataProfileId = settings.MetadataProfileId;
-                            author.AudiobookMonitorExisting = settings.MonitorExisting;
-                            author.AudiobookMonitorFuture = settings.MonitorFuture;
+                    // Apply each missing root-folder default independently. This
+                    // matters when an author was imported through the other format
+                    // or has only a partially configured media side.
+                    author.AudiobookQualityProfileId ??= audiobookSettings.QualityProfileId;
+                    author.AudiobookMetadataProfileId ??= audiobookSettings.MetadataProfileId;
+                    author.AudiobookMonitored ??= audiobookSettings.Monitored;
+                    author.AudiobookMonitorNewItems ??= audiobookSettings.MonitorNewItems;
 
-                            _logger.Debug($"Applied audiobook defaults from root folder to author '{author.Name}' - QualityProfile: {settings.QualityProfileId}, MetadataProfile: {settings.MetadataProfileId}, MonitorExisting: {settings.MonitorExisting}, MonitorFuture: {settings.MonitorFuture}");
-                        }
-                        else
-                        {
-                            _logger.Warn($"No audiobook settings configured for root folder {rootFolder.Path} - skipping author '{author.Name}'");
-                        }
-                    }
+                    _logger.Debug($"Applied missing audiobook defaults from root folder to author '{author.Name}' - QualityProfile: {audiobookSettings.QualityProfileId}, MetadataProfile: {audiobookSettings.MetadataProfileId}, Monitored: {audiobookSettings.Monitored}, MonitorNewItems: {audiobookSettings.MonitorNewItems}, InitialBookMonitoring: {audiobookSettings.MonitorExistingMode}");
                 }
 
                 if (shouldLinkEbook)
@@ -160,90 +168,30 @@ namespace NzbDrone.Core.RootFolders
                         author.Path = folderPath;
                     }
 
-                    // Apply root folder defaults ONLY if not already set
-                    // This handles the case where author was imported via audiobooks first
-                    if (!author.EbookQualityProfileId.HasValue)
-                    {
-                        var settings = _rootFolderSettingsResolver.ResolveSettings(rootFolder, BookMediaType.Ebook);
-                        if (settings.IsConfigured)
-                        {
-                            author.EbookQualityProfileId = settings.QualityProfileId;
-                            author.EbookMetadataProfileId = settings.MetadataProfileId;
-                            author.EbookMonitorExisting = settings.MonitorExisting;
-                            author.EbookMonitorFuture = settings.MonitorFuture;
+                    // Apply each missing root-folder default independently. This
+                    // matters when an author was imported through the other format
+                    // or has only a partially configured media side.
+                    author.EbookQualityProfileId ??= ebookSettings.QualityProfileId;
+                    author.EbookMetadataProfileId ??= ebookSettings.MetadataProfileId;
+                    author.EbookMonitored ??= ebookSettings.Monitored;
+                    author.EbookMonitorNewItems ??= ebookSettings.MonitorNewItems;
 
-                            _logger.Debug($"Applied ebook defaults from root folder to author '{author.Name}' - QualityProfile: {settings.QualityProfileId}, MetadataProfile: {settings.MetadataProfileId}, MonitorExisting: {settings.MonitorExisting}, MonitorFuture: {settings.MonitorFuture}");
-                        }
-                        else
-                        {
-                            _logger.Warn($"No ebook settings configured for root folder {rootFolder.Path} - skipping author '{author.Name}'");
-                        }
-                    }
+                    _logger.Debug($"Applied missing ebook defaults from root folder to author '{author.Name}' - QualityProfile: {ebookSettings.QualityProfileId}, MetadataProfile: {ebookSettings.MetadataProfileId}, Monitored: {ebookSettings.Monitored}, MonitorNewItems: {ebookSettings.MonitorNewItems}, InitialBookMonitoring: {ebookSettings.MonitorExistingMode}");
                 }
 
                 update.NewPath = author.Path;
 
-                // Update existing book monitoring status to match new author preferences
-                // This is crucial for file import to work when root folders are added after books exist
-                if (shouldLinkEbook && author.EbookMonitorExisting.HasValue && author.EbookMonitorExisting.Value > 0)
+                // Seed existing book rows from the root's one-time setting.
+                // This is deliberately independent from the author gate and ongoing
+                // new-item policy; neither of those settings rewrites book flags.
+                if (shouldLinkEbook)
                 {
-                    var existingEbookBooks = _bookService.GetBooksByAuthor(author.Id)
-                        .Where(b => b.MediaType == BookMediaType.Ebook && !b.EbookMonitored).ToList();
-                    
-                    if (existingEbookBooks.Any())
-                    {
-                        foreach (var book in existingEbookBooks)
-                        {
-                            // Apply monitoring based on author's EbookMonitorExisting setting
-                            if (author.EbookMonitorExisting == 1) // All Books
-                            {
-                                book.EbookMonitored = true;
-                                _logger.Debug($"Updated ebook book '{book.Title}' to monitored (All Books mode) after root folder scan");
-                            }
-                            else if (author.EbookMonitorExisting == 2) // Selected Books - enable monitoring but don't force all to monitored
-                            {
-                                // In Select mode, books can be individually controlled, so we just ensure they CAN be monitored
-                                // Don't automatically set to monitored, but the UI can now control them individually
-                                _logger.Debug($"Ebook book '{book.Title}' can now be individually monitored (Selected Books mode)");
-                            }
-                        }
-                        
-                        if (existingEbookBooks.Any(b => b.EbookMonitored))
-                        {
-                            _bookService.UpdateMany(existingEbookBooks);
-                            _logger.Debug($"Updated monitoring for {existingEbookBooks.Count(b => b.EbookMonitored)} existing ebook books for author '{author.Name}'");
-                        }
-                    }
+                    SeedInitialBooks(author, BookMediaType.Ebook, ebookSettings.MonitorExistingMode);
                 }
 
-                if (shouldLinkAudiobook && author.AudiobookMonitorExisting.HasValue && author.AudiobookMonitorExisting.Value > 0)
+                if (shouldLinkAudiobook)
                 {
-                    var existingAudiobookBooks = _bookService.GetBooksByAuthor(author.Id)
-                        .Where(b => b.MediaType == BookMediaType.Audiobook && !b.AudiobookMonitored).ToList();
-                    
-                    if (existingAudiobookBooks.Any())
-                    {
-                        foreach (var book in existingAudiobookBooks)
-                        {
-                            // Apply monitoring based on author's AudiobookMonitorExisting setting
-                            if (author.AudiobookMonitorExisting == 1) // All Books
-                            {
-                                book.AudiobookMonitored = true;
-                                _logger.Debug($"Updated audiobook book '{book.Title}' to monitored (All Books mode) after root folder scan");
-                            }
-                            else if (author.AudiobookMonitorExisting == 2) // Selected Books
-                            {
-                                // In Select mode, books can be individually controlled
-                                _logger.Debug($"Audiobook book '{book.Title}' can now be individually monitored (Selected Books mode)");
-                            }
-                        }
-                        
-                        if (existingAudiobookBooks.Any(b => b.AudiobookMonitored))
-                        {
-                            _bookService.UpdateMany(existingAudiobookBooks);
-                            _logger.Debug($"Updated monitoring for {existingAudiobookBooks.Count(b => b.AudiobookMonitored)} existing audiobook books for author '{author.Name}'");
-                        }
-                    }
+                    SeedInitialBooks(author, BookMediaType.Audiobook, audiobookSettings.MonitorExistingMode);
                 }
 
                 update.HasExistingFiles = relevantFiles.Any();
@@ -271,6 +219,56 @@ namespace NzbDrone.Core.RootFolders
 
             return string.IsNullOrWhiteSpace(existingRootFolderPath) ||
                    existingRootFolderPath.PathEquals(rootFolder.Path);
+        }
+
+        private void SeedInitialBooks(Author author, BookMediaType mediaType, MonitorTypes? monitorMode)
+        {
+            if (!monitorMode.HasValue)
+            {
+                return;
+            }
+
+            var books = (_bookService.GetBooksByAuthor(author.Id) ?? new System.Collections.Generic.List<Book>())
+                .Where(book => book.MediaType == mediaType)
+                .ToList();
+            if (books.Count == 0)
+            {
+                return;
+            }
+
+            var booksWithFiles = (_bookService.GetAuthorBooksWithFiles(author) ?? new System.Collections.Generic.List<Book>())
+                .Where(book => book.MediaType == mediaType)
+                .Select(book => book.Id)
+                .ToHashSet();
+            var changed = new System.Collections.Generic.List<Book>();
+
+            foreach (var book in books)
+            {
+                var hasFile = booksWithFiles.Contains(book.Id);
+                var shouldMonitor = monitorMode.Value switch
+                {
+                    MonitorTypes.All => true,
+                    MonitorTypes.Missing => !hasFile,
+                    MonitorTypes.Existing => hasFile,
+                    MonitorTypes.None => false,
+                    _ => book.IsMonitoredForMediaType(mediaType)
+                };
+
+                if (book.IsMonitoredForMediaType(mediaType) == shouldMonitor)
+                {
+                    continue;
+                }
+
+                book.SetMonitoredForMediaType(mediaType, shouldMonitor);
+                changed.Add(book);
+            }
+
+            if (changed.Count > 0)
+            {
+                _bookService.UpdateMany(changed);
+            }
+
+            _logger.Debug($"Applied initial {monitorMode} monitoring to {books.Count} {mediaType.ToString().ToLowerInvariant()} books for author '{author.Name}' ({changed.Count} changed)");
         }
 
         private static bool IsAudiobookFile(string filePath)

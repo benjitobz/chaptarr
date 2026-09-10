@@ -96,7 +96,13 @@ namespace Chaptarr.Core.Test.MetadataSource
 
         private const string EnrichmentPayload = @"{
             ""data"": {
-                ""authors"": [{ ""id"": 241306, ""bio"": ""Author bio"", ""image"": null }],
+                ""authors"": [{
+                    ""id"": 241306,
+                    ""bio"": ""Author bio"",
+                    ""born_date"": ""1975-01-01"",
+                    ""death_date"": null,
+                    ""image"": null
+                }],
                 ""series"": [{ ""id"": 12717, ""primary_book_series"": [], ""book_series"": [] }]
             }
         }";
@@ -269,6 +275,8 @@ namespace Chaptarr.Core.Test.MetadataSource
             Assert.That(results[0], Is.TypeOf<HardcoverAuthorResult>());
             Assert.That(((HardcoverAuthorResult)results[0]).Id, Is.EqualTo("241306"));
             Assert.That(((HardcoverAuthorResult)results[0]).Name, Is.EqualTo("Matt Dinniman"));
+            Assert.That(((HardcoverAuthorResult)results[0]).BornDate, Is.EqualTo("1975-01-01"));
+            Assert.That(((HardcoverAuthorResult)results[0]).DeathDate, Is.Null);
             Assert.That(results[1], Is.TypeOf<HardcoverBookResult>());
             Assert.That(((HardcoverBookResult)results[1]).Id, Is.EqualTo("446681"));
             Assert.That(((HardcoverBookResult)results[1]).Title, Is.EqualTo("Dungeon Crawler Carl"));
@@ -648,19 +656,40 @@ namespace Chaptarr.Core.Test.MetadataSource
             Assert.That(HardcoverContributionRoles.IsPrimaryAuthor(contribution), Is.EqualTo(expected));
         }
 
-        [TestCase("G. Edward Griffin, G. Edward Griffin, Carleen Taylor, Peter Klimon", true)]
-        [TestCase("G. Edward Griffin, Carleen Taylor", true)]
-        [TestCase("Neil Gaiman & Terry Pratchett", true)]
-        [TestCase("Stephen King and Peter Straub", true)]
-        [TestCase("Larry and Jerry Pournelle Niven", true)]
-        [TestCase("John Smith with Jane Doe", true)]
-        [TestCase("King, Stephen", false)]
-        [TestCase("Tolkien, J.R.R.", false)]
-        [TestCase("George R. R. Martin", false)]
-        [TestCase("Queen Elizabeth II", false)]
-        public void should_match_server_multi_person_identity_guard(string name, bool expected)
+        [Test]
+        public void should_keep_provider_author_objects_regardless_of_name_shape()
         {
-            Assert.That(HardcoverAuthorIdentity.IsLikelyMultiPerson(name), Is.EqualTo(expected));
+            var authorSearch = AuthorSearchPayload.Replace("Matt Dinniman", "Lee and Andrew Child");
+            var authorBooks = AuthorBooksPayload.Replace("Matt Dinniman", "Lee and Andrew Child");
+            var httpClient = new RecordingHttpClient(request =>
+            {
+                using var payload = JsonDocument.Parse(Encoding.UTF8.GetString(request.ContentData));
+                var root = payload.RootElement;
+                var query = root.GetProperty("query").GetString();
+
+                if (root.GetProperty("variables").TryGetProperty("query_type", out var queryTypeElement))
+                {
+                    return queryTypeElement.GetString() switch
+                    {
+                        "Author" => JsonResponse(request, authorSearch),
+                        _ => JsonResponse(request, EmptySearchPayload)
+                    };
+                }
+
+                if (query.Contains("BooksByAuthors", StringComparison.Ordinal))
+                {
+                    return JsonResponse(request, authorBooks);
+                }
+
+                return JsonResponse(request, EmptyEnrichmentPayload);
+            });
+            var client = CreateClient(httpClient);
+
+            var results = client.Search("Lee and Andrew Child");
+
+            var author = results.OfType<HardcoverAuthorResult>().Single();
+            Assert.That(author.Id, Is.EqualTo("241306"));
+            Assert.That(author.Name, Is.EqualTo("Lee and Andrew Child"));
         }
 
         [Test]

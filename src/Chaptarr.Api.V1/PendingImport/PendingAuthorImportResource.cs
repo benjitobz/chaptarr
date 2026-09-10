@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Chaptarr.Api.V1.MediaTypes;
 using Chaptarr.Http.REST;
 using Newtonsoft.Json;
 using NzbDrone.Core.Books;
@@ -19,27 +20,32 @@ namespace Chaptarr.Api.V1.PendingImport
         public string EbookStatus { get; set; }
         public string OverallStatus { get; set; }
         
-        // Audiobook configuration - TRI-STATE MONITORING
-        public int? AudiobookMonitorExisting { get; set; } // 0=None, 1=All, 2=Selected
-        public bool? AudiobookMonitorFuture { get; set; } // true=monitor, false=don't monitor
+        // Audiobook configuration: the author gate is yes/no; new-item policy is separate.
+        public bool? AudiobookMonitored { get; set; }
+        public NewItemMonitorTypes? AudiobookMonitorNewItems { get; set; }
+        public MonitorTypes? AudiobookMonitorExistingMode { get; set; }
         public int? AudiobookQualityProfileId { get; set; }
         public int? AudiobookMetadataProfileId { get; set; }
         public string AudiobookRootFolderPath { get; set; }
         public List<string> AudiobookBooksToMonitor { get; set; }
         public List<string> AudiobookBooksToSearch { get; set; }
+        public HashSet<int> AudiobookTags { get; set; }
         
-        // Ebook configuration - TRI-STATE MONITORING
-        public int? EbookMonitorExisting { get; set; } // 0=None, 1=All, 2=Selected
-        public bool? EbookMonitorFuture { get; set; } // true=monitor, false=don't monitor
+        // Ebook configuration: the author gate is yes/no; new-item policy is separate.
+        public bool? EbookMonitored { get; set; }
+        public NewItemMonitorTypes? EbookMonitorNewItems { get; set; }
+        public MonitorTypes? EbookMonitorExistingMode { get; set; }
         public int? EbookQualityProfileId { get; set; }
         public int? EbookMetadataProfileId { get; set; }
         public string EbookRootFolderPath { get; set; }
         public List<string> EbookBooksToMonitor { get; set; }
         public List<string> EbookBooksToSearch { get; set; }
+        public HashSet<int> EbookTags { get; set; }
         
         // Common
         public HashSet<int> Tags { get; set; }
         public bool SearchForMissingBooks { get; set; }
+        public string LastSelectedMediaType { get; set; }
         
         // Tracking
         public DateTime CreatedAt { get; set; }
@@ -134,19 +140,22 @@ namespace Chaptarr.Api.V1.PendingImport
                 EbookStatus = model.EbookStatus.ToString(),
                 OverallStatus = model.OverallStatus.ToString(),
                 
-                AudiobookMonitorExisting = model.AudiobookMonitorExisting,
-                AudiobookMonitorFuture = model.AudiobookMonitorFuture,
+                AudiobookMonitored = model.AudiobookMonitored,
+                AudiobookMonitorNewItems = model.AudiobookMonitorNewItems,
+                AudiobookMonitorExistingMode = model.AudiobookMonitorExistingMode,
                 AudiobookQualityProfileId = model.AudiobookQualityProfileId,
                 AudiobookMetadataProfileId = model.AudiobookMetadataProfileId,
                 AudiobookRootFolderPath = model.AudiobookRootFolderPath,
                 
-                EbookMonitorExisting = model.EbookMonitorExisting,
-                EbookMonitorFuture = model.EbookMonitorFuture,
+                EbookMonitored = model.EbookMonitored,
+                EbookMonitorNewItems = model.EbookMonitorNewItems,
+                EbookMonitorExistingMode = model.EbookMonitorExistingMode,
                 EbookQualityProfileId = model.EbookQualityProfileId,
                 EbookMetadataProfileId = model.EbookMetadataProfileId,
                 EbookRootFolderPath = model.EbookRootFolderPath,
                 
                 SearchForMissingBooks = model.SearchForMissingBooks,
+                LastSelectedMediaType = model.LastSelectedMediaType,
                 
                 CreatedAt = model.CreatedAt,
                 UpdatedAt = model.UpdatedAt,
@@ -207,6 +216,16 @@ namespace Chaptarr.Api.V1.PendingImport
                 resource.Tags = new HashSet<int>();
             }
 
+            if (TryDeserializeJson(model.AudiobookTags, out HashSet<int> audiobookTags, nameof(model.AudiobookTags), model.Id))
+            {
+                resource.AudiobookTags = audiobookTags ?? new HashSet<int>();
+            }
+
+            if (TryDeserializeJson(model.EbookTags, out HashSet<int> ebookTags, nameof(model.EbookTags), model.Id))
+            {
+                resource.EbookTags = ebookTags ?? new HashSet<int>();
+            }
+
             return resource;
         }
 
@@ -225,19 +244,24 @@ namespace Chaptarr.Api.V1.PendingImport
                 EbookStatus = ParseEnumOrDefault(resource.EbookStatus, PendingImportStatus.NotRequested, nameof(resource.EbookStatus), resource.Id),
                 OverallStatus = ParseEnumOrDefault(resource.OverallStatus, PendingImportStatus.NotRequested, nameof(resource.OverallStatus), resource.Id),
                 
-                AudiobookMonitorExisting = resource.AudiobookMonitorExisting,
-                AudiobookMonitorFuture = resource.AudiobookMonitorFuture,
+                AudiobookMonitored = resource.AudiobookMonitored,
+                AudiobookMonitorNewItems = resource.AudiobookMonitorNewItems,
+                AudiobookMonitorExistingMode = resource.AudiobookMonitorExistingMode,
                 AudiobookQualityProfileId = resource.AudiobookQualityProfileId,
                 AudiobookMetadataProfileId = resource.AudiobookMetadataProfileId,
                 AudiobookRootFolderPath = resource.AudiobookRootFolderPath,
                 
-                EbookMonitorExisting = resource.EbookMonitorExisting,
-                EbookMonitorFuture = resource.EbookMonitorFuture,
+                EbookMonitored = resource.EbookMonitored,
+                EbookMonitorNewItems = resource.EbookMonitorNewItems,
+                EbookMonitorExistingMode = resource.EbookMonitorExistingMode,
                 EbookQualityProfileId = resource.EbookQualityProfileId,
                 EbookMetadataProfileId = resource.EbookMetadataProfileId,
                 EbookRootFolderPath = resource.EbookRootFolderPath,
                 
                 SearchForMissingBooks = resource.SearchForMissingBooks,
+                LastSelectedMediaType = resource.LastSelectedMediaType == null
+                    ? null
+                    : MediaTypeParameterParser.NormalizeOptional(resource.LastSelectedMediaType, allowAll: false),
                 
                 CreatedAt = resource.CreatedAt,
                 UpdatedAt = resource.UpdatedAt,
@@ -273,9 +297,19 @@ namespace Chaptarr.Api.V1.PendingImport
                 model.EbookBooksToSearch = JsonConvert.SerializeObject(resource.EbookBooksToSearch);
             }
 
-            if (resource.Tags?.Count > 0)
+            if (resource.Tags != null)
             {
                 model.Tags = JsonConvert.SerializeObject(resource.Tags);
+            }
+
+            if (resource.AudiobookTags != null)
+            {
+                model.AudiobookTags = JsonConvert.SerializeObject(resource.AudiobookTags);
+            }
+
+            if (resource.EbookTags != null)
+            {
+                model.EbookTags = JsonConvert.SerializeObject(resource.EbookTags);
             }
 
             return model;

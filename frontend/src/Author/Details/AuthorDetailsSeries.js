@@ -11,6 +11,7 @@ import { icons, sortDirections } from 'Helpers/Props';
 import translate from 'Utilities/String/translate';
 import getToggledRange from 'Utilities/Table/getToggledRange';
 import BookRowConnector from './BookRowConnector';
+import tableStyles from './AuthorDetailsBookTable.css';
 import styles from './AuthorDetailsSeries.css';
 
 class AuthorDetailsSeries extends Component {
@@ -57,14 +58,14 @@ class AuthorDetailsSeries extends Component {
 
   isSeriesMonitored(series) {
     const { selectedMediaType } = this.props;
-    
+
     // Use media-type specific monitoring field
     if (selectedMediaType === 'audiobook') {
       return series.items.every((book) => book.audiobookMonitored);
     } else if (selectedMediaType === 'ebook') {
       return series.items.every((book) => book.ebookMonitored);
     }
-    
+
     // Fallback: check if any media type is monitored
     return series.items.every((book) => book.audiobookMonitored || book.ebookMonitored);
   }
@@ -124,9 +125,12 @@ class AuthorDetailsSeries extends Component {
       onSortPress,
       isSmallScreen,
       onTableOptionChange,
-      authorMonitored,
       selectedMediaType
     } = this.props;
+    const tableColumns = columns.map((column) => ({
+      ...column,
+      className: column.className || tableStyles[column.name]
+    }));
 
     return (
       <div
@@ -136,9 +140,7 @@ class AuthorDetailsSeries extends Component {
           <MonitorToggleButton
             size={24}
             monitored={this.isSeriesMonitored(this.props)}
-            isDisabled={!authorMonitored}
             isSaving={this.isSeriesSaving(this.props)}
-            isBinary={true}
             onPress={this.onMonitorSeriesPress}
           />
 
@@ -183,7 +185,8 @@ class AuthorDetailsSeries extends Component {
             isExpanded &&
               <div className={styles.books}>
                 <Table
-                  columns={columns}
+                  className={tableStyles.table}
+                  columns={tableColumns}
                   sortKey={sortKey}
                   sortDirection={sortDirection}
                   onSortPress={onSortPress}
@@ -240,7 +243,6 @@ AuthorDetailsSeries.propTypes = {
   onSortPress: PropTypes.func.isRequired,
   onMonitorBookPress: PropTypes.func.isRequired,
   uiSettings: PropTypes.object.isRequired,
-  authorMonitored: PropTypes.bool.isRequired,
   selectedMediaType: PropTypes.string
 };
 
