@@ -38,6 +38,22 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
         }
 
         [Test]
+        public void should_notify_on_library_imports_only_when_pushing()
+        {
+            var subject = CreateSubject(new FakeGrimmoryProxy());
+            var settings = (GrimmorySettings)subject.Definition.Settings;
+
+            Assert.That(subject.NotifyOnLibraryImports, Is.False);
+
+            settings.PushMetadata = true;
+            Assert.That(subject.NotifyOnLibraryImports, Is.True);
+
+            settings.PushMetadata = false;
+            settings.PushCovers = true;
+            Assert.That(subject.NotifyOnLibraryImports, Is.True);
+        }
+
+        [Test]
         public void should_dedupe_multiple_events_into_single_refresh()
         {
             var proxy = new FakeGrimmoryProxy();

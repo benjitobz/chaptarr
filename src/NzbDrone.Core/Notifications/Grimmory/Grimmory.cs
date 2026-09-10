@@ -32,6 +32,8 @@ namespace NzbDrone.Core.Notifications.Grimmory
         public override string Name => "Grimmory";
         public override string Link => "https://github.com/grimmory-tools/grimmory";
 
+        public override bool NotifyOnLibraryImports => Settings.PushMetadata || Settings.PushCovers;
+
         private class GrimmoryUpdateQueue
         {
             public HashSet<long> PendingLibraries { get; } = new HashSet<long>();
