@@ -22,7 +22,7 @@ class DeleteBookModalContent extends Component {
 
     this.state = {
       deleteFiles: false,
-      addImportListExclusion: true
+      addImportListExclusion: false
     };
   }
 
