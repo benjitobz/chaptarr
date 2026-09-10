@@ -5,6 +5,7 @@ import AuthorHistoryTable from 'Author/History/AuthorHistoryTable';
 import DeleteBookModal from 'Book/Delete/DeleteBookModal';
 import EditBookModalConnector from 'Book/Edit/EditBookModalConnector';
 import BookFileEditorTable from 'BookFile/Editor/BookFileEditorTable';
+import GrimmoryPushModal from 'Grimmory/GrimmoryPushModal';
 import IconButton from 'Components/Link/IconButton';
 import LoadingIndicator from 'Components/Loading/LoadingIndicator';
 import PageContent from 'Components/Page/PageContent';
@@ -38,6 +39,7 @@ class BookDetails extends Component {
       isCalibrePushModalOpen: false,
       isOrganizeModalOpen: false,
       isRetagModalOpen: false,
+      isGrimmoryPushModalOpen: false,
       isEditBookModalOpen: false,
       isDeleteBookModalOpen: false,
       selectedTabIndex: 0
@@ -89,6 +91,19 @@ class BookDetails extends Component {
     this.props.onPushToCalibrePress(fields);
   };
 
+  onGrimmoryPushPress = () => {
+    this.setState({ isGrimmoryPushModalOpen: true });
+  };
+
+  onGrimmoryPushModalClose = () => {
+    this.setState({ isGrimmoryPushModalOpen: false });
+  };
+
+  onGrimmoryPushConfirmed = (fields) => {
+    this.setState({ isGrimmoryPushModalOpen: false });
+    this.props.onPushToGrimmoryPress(fields);
+  };
+
   onEditBookPress = () => {
     this.setState({ isEditBookModalOpen: true });
   };
@@ -137,6 +152,9 @@ class BookDetails extends Component {
       onPushToCalibrePress,
       isRePushing,
       showRePush,
+      showPushToGrimmory,
+      isPushingToGrimmory,
+      grimmoryPreview,
       onRefreshPress,
       onRePushPress,
       onSearchPress,
@@ -160,6 +178,7 @@ class BookDetails extends Component {
     const {
       isOrganizeModalOpen,
       isRetagModalOpen,
+      isGrimmoryPushModalOpen,
       isEditBookModalOpen,
       isDeleteBookModalOpen,
       selectedTabIndex
@@ -230,6 +249,23 @@ class BookDetails extends Component {
                     isDisabled={!hasBookFiles}
                     isSpinning={isRePushing}
                     onPress={onRePushPress}
+                  />
+
+                  <PageToolbarSeparator />
+                </Fragment> :
+                null
+            }
+
+            {
+              showPushToGrimmory ?
+                <Fragment>
+                  <PageToolbarButton
+                    label={translate('GrimmoryPush')}
+                    title={translate('PushChaptarrMetadataToGrimmory')}
+                    iconName={icons.EXPORT}
+                    isDisabled={!hasBookFiles}
+                    isSpinning={isPushingToGrimmory}
+                    onPress={this.onGrimmoryPushPress}
                   />
 
                   <PageToolbarSeparator />
@@ -449,6 +485,14 @@ class BookDetails extends Component {
             onModalClose={this.onDeleteBookModalClose}
           />
 
+          <GrimmoryPushModal
+            isOpen={isGrimmoryPushModalOpen}
+            bookCount={1}
+            previewValues={grimmoryPreview}
+            onPushPress={this.onGrimmoryPushConfirmed}
+            onModalClose={this.onGrimmoryPushModalClose}
+          />
+
         </PageContentBody>
       </PageContent>
     );
@@ -490,6 +534,10 @@ BookDetails.propTypes = {
   nextBook: PropTypes.object,
   hasBookNavigation: PropTypes.bool,
   isSmallScreen: PropTypes.bool.isRequired,
+  showPushToGrimmory: PropTypes.bool,
+  isPushingToGrimmory: PropTypes.bool,
+  grimmoryPreview: PropTypes.object,
+  onPushToGrimmoryPress: PropTypes.func,
   onMonitorTogglePress: PropTypes.func.isRequired,
   onRefreshPress: PropTypes.func,
   onRePushPress: PropTypes.func,

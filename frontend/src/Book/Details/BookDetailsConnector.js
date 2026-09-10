@@ -21,6 +21,34 @@ import { findCommand, isCommandExecuting } from 'Utilities/Command';
 import { registerPagePopulator, unregisterPagePopulator } from 'Utilities/pagePopulator';
 import BookDetails from './BookDetails';
 
+function buildGrimmoryPreview(book, author, edition) {
+  const identifiers = [];
+
+  if (edition?.isbn13) {
+    identifiers.push(`isbn: ${edition.isbn13}`);
+  }
+
+  if (edition?.asin) {
+    identifiers.push(`asin: ${edition.asin}`);
+  }
+
+  if (edition?.foreignEditionId) {
+    identifiers.push(`goodreads: ${edition.foreignEditionId}`);
+  }
+
+  return {
+    title: edition?.title || book.title,
+    authors: author.authorName,
+    series: book.seriesTitle,
+    description: edition?.overview || book.overview,
+    publisher: edition?.publisher,
+    publisheddate: book.releaseDate,
+    language: edition?.language,
+    tags: (book.genres || []).join(', '),
+    identifiers: identifiers.join(', ')
+  };
+}
+
 const selectBookFiles = createSelector(
   (state) => state.bookFiles,
   (bookFiles) => {
@@ -182,6 +210,15 @@ function createMapStateToProps() {
         isRenamingAuthorCommand.body.authorIds.indexOf(author.id) > -1
         );
 
+        const grimmoryPushCommand = findCommand(commands, { name: commandNames.PUSH_GRIMMORY_METADATA });
+        const isPushingToGrimmory = !!(
+          grimmoryPushCommand &&
+        isCommandExecuting(grimmoryPushCommand) &&
+        grimmoryPushCommand.body &&
+        (grimmoryPushCommand.body.bookIds || []).includes(book.id)
+        );
+        const showPushToGrimmory = notifications.some((n) => n.implementation === 'Grimmory');
+
         const isFetching = isBookFilesFetching || editions.isFetching;
         const isPopulated = isBookFilesPopulated && editions.isPopulated;
         const selectedEdition = editions.items
@@ -211,6 +248,9 @@ function createMapStateToProps() {
           isSearching,
           isRePushing,
           showRePush: notifications.some((n) => n.implementation === 'CalibreContentServer'),
+          showPushToGrimmory,
+          isPushingToGrimmory,
+          grimmoryPreview: buildGrimmoryPreview(book, author, selectedEdition),
           isRenamingFiles,
           isRenamingAuthor,
           isFetching,
@@ -352,6 +392,14 @@ class BookDetailsConnector extends Component {
     });
   };
 
+  onPushToGrimmoryPress = (fields) => {
+    this.props.executeCommand({
+      name: commandNames.PUSH_GRIMMORY_METADATA,
+      bookIds: [this.props.id],
+      fields
+    });
+  };
+
   //
   // Render
 
@@ -364,6 +412,7 @@ class BookDetailsConnector extends Component {
         onRePushPress={this.onRePushPress}
         onSearchPress={this.onSearchPress}
         onPushToCalibrePress={this.onPushToCalibrePress}
+        onPushToGrimmoryPress={this.onPushToGrimmoryPress}
       />
     );
   }
@@ -379,6 +428,7 @@ BookDetailsConnector.propTypes = {
   isBookFetching: PropTypes.bool,
   isBookPopulated: PropTypes.bool,
   bookId: PropTypes.number.isRequired,
+  fetchNotifications: PropTypes.func.isRequired,
   fetchBookFiles: PropTypes.func.isRequired,
   clearBookFiles: PropTypes.func.isRequired,
   fetchEditions: PropTypes.func.isRequired,
