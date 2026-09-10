@@ -8,6 +8,7 @@ import PageContentFooter from 'Components/Page/PageContentFooter';
 import { kinds } from 'Helpers/Props';
 import { executeCommand } from 'Store/Actions/commandActions';
 import { fetchRootFolders } from 'Store/Actions/Settings/rootFolders';
+import { fetchNotifications } from 'Store/Actions/settingsActions';
 import createCommandExecutingSelector from 'Store/Selectors/createCommandExecutingSelector';
 import translate from 'Utilities/String/translate';
 import CalibrePushModal from 'Calibre/CalibrePushModal';
@@ -39,6 +40,7 @@ class BookEditorFooter extends Component {
 
   componentDidMount() {
     this.props.fetchRootFolders();
+    this.props.fetchNotifications();
   }
 
   componentDidUpdate(prevProps) {
@@ -90,6 +92,10 @@ class BookEditorFooter extends Component {
       name: commandNames.PUSH_CALIBRE_METADATA,
       bookIds: this.props.bookIds,
       fields
+  onResendToCalibrePress = () => {
+    this.props.executeCommand({
+      name: commandNames.REPUSH_BOOK,
+      bookIds: this.props.bookIds
     });
   };
 
@@ -112,6 +118,8 @@ class BookEditorFooter extends Component {
       isDeleting,
       isPushingToCalibre,
       showPushToCalibre
+      isResendingToCalibre,
+      showResendToCalibre
     } = this.props;
 
     const {
@@ -165,6 +173,20 @@ class BookEditorFooter extends Component {
                   null
               }
 
+              {
+                showResendToCalibre ?
+                  <SpinnerButton
+                    className={styles.organizeSelectedButton}
+                    kind={kinds.WARNING}
+                    isSpinning={isResendingToCalibre}
+                    isDisabled={!selectedCount || isResendingToCalibre}
+                    onPress={this.onResendToCalibrePress}
+                  >
+                    {translate('ResendToCalibre')}
+                  </SpinnerButton> :
+                  null
+              }
+
               <SpinnerButton
                 className={styles.deleteSelectedButton}
                 kind={kinds.DANGER}
@@ -197,6 +219,10 @@ class BookEditorFooter extends Component {
 }
 
 BookEditorFooter.propTypes = {
+  isResendingToCalibre: PropTypes.bool.isRequired,
+  showResendToCalibre: PropTypes.bool.isRequired,
+  executeCommand: PropTypes.func.isRequired,
+  fetchNotifications: PropTypes.func.isRequired,
   bookIds: PropTypes.arrayOf(PropTypes.number).isRequired,
   selectedCount: PropTypes.number.isRequired,
   isSaving: PropTypes.bool.isRequired,
@@ -205,18 +231,20 @@ BookEditorFooter.propTypes = {
   deleteError: PropTypes.object,
   isPushingToCalibre: PropTypes.bool.isRequired,
   showPushToCalibre: PropTypes.bool.isRequired,
-  executeCommand: PropTypes.func.isRequired,
   fetchRootFolders: PropTypes.func.isRequired,
   onSaveSelected: PropTypes.func.isRequired
 };
 
 const selectIsPushingToCalibre = createCommandExecutingSelector(commandNames.PUSH_CALIBRE_METADATA);
+const selectIsResendingToCalibre = createCommandExecutingSelector(commandNames.REPUSH_BOOK);
 
 function mapStateToProps(state) {
   return {
     isPushingToCalibre: selectIsPushingToCalibre(state),
-    showPushToCalibre: state.settings.rootFolders.items.some((f) => f.isCalibreLibrary)
+    showPushToCalibre: state.settings.rootFolders.items.some((f) => f.isCalibreLibrary),
+    isResendingToCalibre: selectIsResendingToCalibre(state),
+    showResendToCalibre: state.settings.notifications.items.some((n) => n.implementation === 'CalibreContentServer')
   };
 }
 
-export default connect(mapStateToProps, { executeCommand, fetchRootFolders })(BookEditorFooter);
+export default connect(mapStateToProps, { executeCommand, fetchRootFolders, fetchNotifications })(BookEditorFooter);
