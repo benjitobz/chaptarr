@@ -64,6 +64,10 @@ namespace NzbDrone.Core.Books.Services
                 throw new ArgumentException($"Invalid provider ID format: {providerId}");
             }
 
+            config ??= new MonitoringConfig();
+            var incomingAudiobookTags = ResolveMediaTags(config.CreateAudiobook, config.AudiobookTags, config.Tags);
+            var incomingEbookTags = ResolveMediaTags(config.CreateEbook, config.EbookTags, config.Tags);
+
             // A book request may need the metadata-server rescue lifecycle even when its author
             // already exists locally. Author-only requests can still stop here.
             if (!HasRequestedBooks(config))
@@ -100,9 +104,9 @@ namespace NzbDrone.Core.Books.Services
                     if (config.CreateAudiobook && !existing.HasAudiobook())
                     {
                         existing.AudiobookStatus = PendingImportStatus.Pending;
-                        // Convert bool to int?: true=1 (All), false=0 (None)
-                        existing.AudiobookMonitorExisting = config.AudiobookMonitorExisting ?? (config.MonitorExisting ? 1 : 0);
-                        existing.AudiobookMonitorFuture = config.AudiobookMonitorFuture ?? config.MonitorFuture;
+                        existing.AudiobookMonitored = config.AudiobookMonitored;
+                        existing.AudiobookMonitorNewItems = config.AudiobookMonitorNewItems;
+                        existing.AudiobookMonitorExistingMode = config.AudiobookMonitorExistingMode;
                         existing.AudiobookQualityProfileId = config.AudiobookQualityProfileId;
                         existing.AudiobookMetadataProfileId = config.AudiobookMetadataProfileId;
                         existing.AudiobookRootFolderPath = config.AudiobookRootFolderPath;
@@ -124,13 +128,51 @@ namespace NzbDrone.Core.Books.Services
                         updated = true;
                     }
 
+                    if (config.CreateAudiobook && MergeExistingMonitorMode(
+                            existing.AudiobookMonitorExistingMode,
+                            config.AudiobookMonitorExistingMode,
+                            out var audiobookMonitorExistingMode))
+                    {
+                        existing.AudiobookMonitorExistingMode = audiobookMonitorExistingMode;
+                        updated = true;
+                    }
+
+                    // An additional request may enable the side, but never turns an
+                    // already-enabled side off. This is important when two exact-book
+                    // requests for the same unavailable author merge into one row.
+                    if (config.CreateAudiobook && config.AudiobookMonitored == true && existing.AudiobookMonitored != true)
+                    {
+                        existing.AudiobookMonitored = true;
+                        updated = true;
+                    }
+
+                    if (config.CreateAudiobook && MergeNewItemMonitorType(
+                            existing.AudiobookMonitorNewItems,
+                            config.AudiobookMonitorNewItems,
+                            out var audiobookMonitorNewItems))
+                    {
+                        existing.AudiobookMonitorNewItems = audiobookMonitorNewItems;
+                        updated = true;
+                    }
+
+                    if (config.CreateAudiobook && TryMergeTags(
+                            existing.AudiobookTags,
+                            incomingAudiobookTags,
+                            nameof(existing.AudiobookTags),
+                            providerId,
+                            out var audiobookTags))
+                    {
+                        existing.AudiobookTags = audiobookTags;
+                        updated = true;
+                    }
+
                     // Enable ebook if requested and not already
                     if (config.CreateEbook && !existing.HasEbook())
                     {
                         existing.EbookStatus = PendingImportStatus.Pending;
-                        // Convert bool to int?: true=1 (All), false=0 (None)
-                        existing.EbookMonitorExisting = config.EbookMonitorExisting ?? (config.MonitorExisting ? 1 : 0);
-                        existing.EbookMonitorFuture = config.EbookMonitorFuture ?? config.MonitorFuture;
+                        existing.EbookMonitored = config.EbookMonitored;
+                        existing.EbookMonitorNewItems = config.EbookMonitorNewItems;
+                        existing.EbookMonitorExistingMode = config.EbookMonitorExistingMode;
                         existing.EbookQualityProfileId = config.EbookQualityProfileId;
                         existing.EbookMetadataProfileId = config.EbookMetadataProfileId;
                         existing.EbookRootFolderPath = config.EbookRootFolderPath;
@@ -163,6 +205,30 @@ namespace NzbDrone.Core.Books.Services
                         updated = true;
                     }
 
+                    if (config.CreateEbook && config.EbookMonitored == true && existing.EbookMonitored != true)
+                    {
+                        existing.EbookMonitored = true;
+                        updated = true;
+                    }
+
+                    if (config.CreateEbook && MergeNewItemMonitorType(
+                            existing.EbookMonitorNewItems,
+                            config.EbookMonitorNewItems,
+                            out var ebookMonitorNewItems))
+                    {
+                        existing.EbookMonitorNewItems = ebookMonitorNewItems;
+                        updated = true;
+                    }
+
+                    if (config.CreateEbook && MergeExistingMonitorMode(
+                            existing.EbookMonitorExistingMode,
+                            config.EbookMonitorExistingMode,
+                            out var ebookMonitorExistingMode))
+                    {
+                        existing.EbookMonitorExistingMode = ebookMonitorExistingMode;
+                        updated = true;
+                    }
+
                     if (config.CreateEbook && TryMergeProviderIds(
                             existing.EbookBooksToSearch,
                             config.EbookBooksToSearch,
@@ -174,9 +240,33 @@ namespace NzbDrone.Core.Books.Services
                         updated = true;
                     }
 
+                    if (config.CreateEbook && TryMergeTags(
+                            existing.EbookTags,
+                            incomingEbookTags,
+                            nameof(existing.EbookTags),
+                            providerId,
+                            out var ebookTags))
+                    {
+                        existing.EbookTags = ebookTags;
+                        updated = true;
+                    }
+
+                    if (TryMergeTags(existing.Tags, config.Tags, nameof(existing.Tags), providerId, out var tags))
+                    {
+                        existing.Tags = tags;
+                        updated = true;
+                    }
+
                     if (config.SearchForMissingBooks == true && !existing.SearchForMissingBooks)
                     {
                         existing.SearchForMissingBooks = true;
+                        updated = true;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(config.LastSelectedMediaType) &&
+                        !string.Equals(existing.LastSelectedMediaType, config.LastSelectedMediaType, StringComparison.OrdinalIgnoreCase))
+                    {
+                        existing.LastSelectedMediaType = config.LastSelectedMediaType;
                         updated = true;
                     }
 
@@ -225,6 +315,7 @@ namespace NzbDrone.Core.Books.Services
                     SourceApplication = sourceApplication,
                     RequestedBy = config.RequestedBy,
                     SearchForMissingBooks = config.SearchForMissingBooks ?? false,
+                    LastSelectedMediaType = config.LastSelectedMediaType,
                     Version = 1
                 };
 
@@ -232,12 +323,13 @@ namespace NzbDrone.Core.Books.Services
                 if (config.CreateAudiobook)
                 {
                     pending.AudiobookStatus = PendingImportStatus.Pending;
-                    // Convert bool to int?: true=1 (All), false=0 (None)
-                    pending.AudiobookMonitorExisting = config.AudiobookMonitorExisting ?? (config.MonitorExisting ? 1 : 0);
-                    pending.AudiobookMonitorFuture = config.AudiobookMonitorFuture ?? config.MonitorFuture;
+                    pending.AudiobookMonitored = config.AudiobookMonitored;
+                    pending.AudiobookMonitorNewItems = config.AudiobookMonitorNewItems;
+                    pending.AudiobookMonitorExistingMode = config.AudiobookMonitorExistingMode;
                     pending.AudiobookQualityProfileId = config.AudiobookQualityProfileId;
                     pending.AudiobookMetadataProfileId = config.AudiobookMetadataProfileId;
                     pending.AudiobookRootFolderPath = config.AudiobookRootFolderPath;
+                    pending.AudiobookTags = SerializeTags(incomingAudiobookTags);
 
                     if (config.AudiobookBooksToMonitor?.Any() == true)
                     {
@@ -254,12 +346,13 @@ namespace NzbDrone.Core.Books.Services
                 if (config.CreateEbook)
                 {
                     pending.EbookStatus = PendingImportStatus.Pending;
-                    // Convert bool to int?: true=1 (All), false=0 (None)
-                    pending.EbookMonitorExisting = config.EbookMonitorExisting ?? (config.MonitorExisting ? 1 : 0);
-                    pending.EbookMonitorFuture = config.EbookMonitorFuture ?? config.MonitorFuture;
+                    pending.EbookMonitored = config.EbookMonitored;
+                    pending.EbookMonitorNewItems = config.EbookMonitorNewItems;
+                    pending.EbookMonitorExistingMode = config.EbookMonitorExistingMode;
                     pending.EbookQualityProfileId = config.EbookQualityProfileId;
                     pending.EbookMetadataProfileId = config.EbookMetadataProfileId;
                     pending.EbookRootFolderPath = config.EbookRootFolderPath;
+                    pending.EbookTags = SerializeTags(incomingEbookTags);
 
                     if (config.EbookBooksToMonitor?.Any() == true)
                     {
@@ -273,9 +366,9 @@ namespace NzbDrone.Core.Books.Services
                 }
 
                 // Set common fields
-                if (config.Tags?.Any() == true)
+                if (config.Tags != null)
                 {
-                    pending.Tags = JsonConvert.SerializeObject(config.Tags);
+                    pending.Tags = SerializeTags(config.Tags);
                 }
 
                 pending.UpdateOverallStatus();
@@ -307,6 +400,61 @@ namespace NzbDrone.Core.Books.Services
                    config?.AudiobookBooksToSearch?.Any() == true ||
                    config?.EbookBooksToMonitor?.Any() == true ||
                    config?.EbookBooksToSearch?.Any() == true;
+        }
+
+        private static bool MergeExistingMonitorMode(
+            MonitorTypes? existing,
+            MonitorTypes? incoming,
+            out MonitorTypes? merged)
+        {
+            merged = existing;
+            if (!incoming.HasValue)
+            {
+                return false;
+            }
+
+            if (!existing.HasValue || existing == MonitorTypes.None)
+            {
+                merged = incoming;
+                return existing != incoming;
+            }
+
+            // An all-books seed is the strongest current-book intent and must not
+            // be narrowed by a later exact/none request. Other existing modes are
+            // retained unless the incoming request explicitly widens them to All.
+            if (incoming == MonitorTypes.All && existing != MonitorTypes.All)
+            {
+                merged = MonitorTypes.All;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool MergeNewItemMonitorType(
+            NewItemMonitorTypes? existing,
+            NewItemMonitorTypes? incoming,
+            out NewItemMonitorTypes? merged)
+        {
+            merged = existing;
+            if (!incoming.HasValue)
+            {
+                return false;
+            }
+
+            if (!existing.HasValue || existing == NewItemMonitorTypes.None)
+            {
+                merged = incoming;
+                return existing != incoming;
+            }
+
+            if (incoming == NewItemMonitorTypes.All && existing != NewItemMonitorTypes.All)
+            {
+                merged = NewItemMonitorTypes.All;
+                return true;
+            }
+
+            return false;
         }
 
         private static bool IsActiveProviderUniqueViolation(SqliteException ex)
@@ -363,6 +511,61 @@ namespace NzbDrone.Core.Books.Services
                 _logger.Warn(ex, "Failed to merge {0} for existing pending import {1}", fieldName, providerId);
                 return false;
             }
+        }
+
+        private bool TryMergeTags(
+            string existingJson,
+            IEnumerable<int> incoming,
+            string fieldName,
+            string providerId,
+            out string mergedJson)
+        {
+            mergedJson = existingJson;
+            if (incoming == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                var existingTags = string.IsNullOrWhiteSpace(existingJson)
+                    ? new HashSet<int>()
+                    : JsonConvert.DeserializeObject<HashSet<int>>(existingJson) ?? new HashSet<int>();
+                var mergedTags = new HashSet<int>(existingTags);
+                mergedTags.UnionWith(incoming);
+                var serialized = SerializeTags(mergedTags);
+
+                if (string.Equals(existingJson, serialized, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                mergedJson = serialized;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, "Failed to merge {0} for existing pending import {1}", fieldName, providerId);
+                return false;
+            }
+        }
+
+        private static HashSet<int> ResolveMediaTags(bool createMediaType, HashSet<int> mediaTags, HashSet<int> legacyTags)
+        {
+            if (!createMediaType)
+            {
+                return null;
+            }
+
+            var tags = mediaTags ?? legacyTags;
+            return tags == null ? null : new HashSet<int>(tags);
+        }
+
+        private static string SerializeTags(IEnumerable<int> tags)
+        {
+            return tags == null
+                ? null
+                : JsonConvert.SerializeObject(tags.Distinct().OrderBy(tag => tag));
         }
 
         public void UpdateStatus(PendingAuthorImport item, PendingImportStatus status, string error)

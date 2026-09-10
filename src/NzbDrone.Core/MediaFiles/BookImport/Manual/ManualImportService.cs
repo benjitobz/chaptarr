@@ -542,23 +542,34 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Manual
             RootFolder ResolveRootFolderForHydration(RootFolder fileRootFolder, BookMediaType mediaType, out string error)
             {
                 error = null;
+                var rootFolder = fileRootFolder;
 
-                if (fileRootFolder != null)
+                if (rootFolder == null)
                 {
-                    return fileRootFolder;
+                    var preferredType = mediaType == BookMediaType.Audiobook ? FolderType.Audiobook : FolderType.Ebook;
+                    var defaultRootFolderPath = preferredType == FolderType.Audiobook
+                        ? _configService.DefaultAudiobookRootFolderPath
+                        : _configService.DefaultEbookRootFolderPath;
+
+                    if (!RootFolderDefaultResolver.TryGetEffectiveDefaultRootFolder(
+                            _rootFolderService.All(),
+                            preferredType,
+                            defaultRootFolderPath,
+                            out rootFolder,
+                            out error))
+                    {
+                        return null;
+                    }
                 }
 
-                var preferredType = mediaType == BookMediaType.Audiobook ? FolderType.Audiobook : FolderType.Ebook;
-                var defaultRootFolderPath = preferredType == FolderType.Audiobook
-                    ? _configService.DefaultAudiobookRootFolderPath
-                    : _configService.DefaultEbookRootFolderPath;
+                var settings = _rootFolderSettingsResolver.ResolveSettings(rootFolder, mediaType);
+                if (settings == null || !settings.IsConfigured)
+                {
+                    error = $"Root folder '{rootFolder.Path}' is missing complete {mediaType.ToString().ToLowerInvariant()} quality and metadata profile defaults";
+                    return null;
+                }
 
-                return RootFolderDefaultResolver.TryGetEffectiveDefaultRootFolder(
-                    _rootFolderService.All(),
-                    preferredType,
-                    defaultRootFolderPath,
-                    out var rootFolder,
-                    out error) ? rootFolder : null;
+                return rootFolder;
             }
 
             MonitoringConfig BuildHydrationConfig(string filePath, RootFolder rootFolder, BookMediaType mediaType)
@@ -578,23 +589,25 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Manual
                 }
 
                 var settings = _rootFolderSettingsResolver.ResolveSettings(rootFolder, mediaType);
-                config.Tags = settings?.Tags != null ? new HashSet<int>(settings.Tags) : null;
-
                 if (mediaType == BookMediaType.Audiobook)
                 {
                     config.AudiobookRootFolderPath = rootFolder.Path;
                     config.AudiobookQualityProfileId = settings?.QualityProfileId;
                     config.AudiobookMetadataProfileId = settings?.MetadataProfileId;
-                    config.AudiobookMonitorExisting = settings?.MonitorExisting;
-                    config.AudiobookMonitorFuture = settings?.MonitorFuture;
+                    config.AudiobookMonitorExistingMode = RootFolderSettingsResolver.ResolveInitialMonitorMode(settings?.MonitorExistingMode);
+                    config.AudiobookMonitored = settings?.Monitored;
+                    config.AudiobookMonitorNewItems = settings?.MonitorNewItems;
+                    config.AudiobookTags = settings?.Tags == null ? null : new HashSet<int>(settings.Tags);
                 }
                 else
                 {
                     config.EbookRootFolderPath = rootFolder.Path;
                     config.EbookQualityProfileId = settings?.QualityProfileId;
                     config.EbookMetadataProfileId = settings?.MetadataProfileId;
-                    config.EbookMonitorExisting = settings?.MonitorExisting;
-                    config.EbookMonitorFuture = settings?.MonitorFuture;
+                    config.EbookMonitorExistingMode = RootFolderSettingsResolver.ResolveInitialMonitorMode(settings?.MonitorExistingMode);
+                    config.EbookMonitored = settings?.Monitored;
+                    config.EbookMonitorNewItems = settings?.MonitorNewItems;
+                    config.EbookTags = settings?.Tags == null ? null : new HashSet<int>(settings.Tags);
                 }
 
                 // Preserve the on-disk author folder when the file lives under a root folder.

@@ -4,15 +4,34 @@ const monitorOptions = [
   { key: 'all', get value() {
     return translate('AllBooks');
   } },
-  { key: 'existing', get value() {
-    return translate('ExistingBooks');
-  } },
   { key: 'missing', get value() {
     return translate('MissingBooks');
+  } },
+  { key: 'existing', get value() {
+    return translate('BooksWithFiles');
   } },
   { key: 'none', get value() {
     return translate('None');
   } }
 ];
+
+const monitorOptionKeys = new Set(monitorOptions.map(({ key }) => key));
+
+export function normalizeMonitorOption(value) {
+  const normalized = (value ?? '').toString().trim().toLowerCase();
+  return monitorOptionKeys.has(normalized) ? normalized : 'none';
+}
+
+export function resolveMonitorOptionValue(value, fallbackValue) {
+  return normalizeMonitorOption(value ?? fallbackValue);
+}
+
+export function resolveMonitorOption(value, legacyMonitorExistingBooks) {
+  if (value != null) {
+    return normalizeMonitorOption(value);
+  }
+
+  return legacyMonitorExistingBooks === true ? 'all' : 'none';
+}
 
 export default monitorOptions;

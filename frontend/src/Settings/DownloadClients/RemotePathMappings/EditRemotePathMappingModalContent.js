@@ -51,42 +51,64 @@ function PathSuggestions(props) {
 }
 
 function getTestResultMessage(testResult) {
+  if (!testResult.isMapped) {
+    return translate('RemotePathMappingTestNoChange', testResult);
+  }
+
   if (testResult.downloadClientPathChecked && !testResult.downloadClientPathMatched) {
-    return `Test result: Chaptarr can map ${testResult.remotePath} to ${testResult.mappedPath}, but the selected download client did not report a matching path. Check the "Download client sees" value.`;
+    return translate('RemotePathMappingTestClientPathMismatch', testResult);
   }
 
   if (testResult.downloadClientItemPathChecked && !testResult.downloadClientItemPathExists) {
-    return `Test result: A current download-client item maps to ${testResult.downloadClientItemMappedPath}, but Chaptarr cannot see that actual item there. This mapping is probably wrong.`;
+    return translate('RemotePathMappingTestClientItemMissing', testResult);
   }
 
   if (testResult.downloadClientItemPathChecked && !testResult.downloadClientItemPathWritable) {
-    return `Test result: Chaptarr can see a current download-client item at ${testResult.downloadClientItemMappedPath}, but cannot write there.`;
+    return translate('RemotePathMappingTestClientItemNotWritable', testResult);
   }
 
   if (!testResult.mappedPathExists) {
-    return `Test result: ${testResult.remotePath} maps to ${testResult.mappedPath}. Chaptarr cannot see that mapped path.`;
+    return translate('RemotePathMappingTestMappedPathMissing', testResult);
   }
 
   if (!testResult.mappedPathWritable) {
-    return `Test result: ${testResult.remotePath} maps to ${testResult.mappedPath}. Chaptarr can see it, but cannot write there.`;
+    return translate('RemotePathMappingTestMappedPathNotWritable', testResult);
+  }
+
+  if (testResult.downloadClientId === 0) {
+    return translate('RemotePathMappingTestHostWideSuccess', testResult);
   }
 
   if (testResult.downloadClientItemPathChecked) {
-    return `Test result: Chaptarr can see a current download-client item at ${testResult.downloadClientItemMappedPath}.`;
+    return translate('RemotePathMappingTestClientItemVisible', testResult);
   }
 
   if (testResult.downloadClientTestError) {
-    return `Test result: ${testResult.remotePath} maps to ${testResult.mappedPath}. ${testResult.downloadClientTestError}`;
+    return translate('RemotePathMappingTestClientError', testResult);
   }
 
   if (testResult.downloadClientPathChecked) {
-    return `Test result: ${testResult.remotePath} maps to ${testResult.mappedPath}. Chaptarr can see and write there, but no current download item was available to prove both sides are the same folder.`;
+    return translate('RemotePathMappingTestNoClientItem', testResult);
   }
 
-  return `Test result: ${testResult.remotePath} maps to ${testResult.mappedPath}. Chaptarr can see and write there, but no download client was available to compare against.`;
+  return translate('RemotePathMappingTestNoClient', testResult);
 }
 
 function getTestResultKind(testResult) {
+  if (testResult.downloadClientId === 0) {
+    if (
+      testResult.isMapped &&
+      testResult.localPathExists &&
+      testResult.localPathWritable &&
+      testResult.mappedPathExists &&
+      testResult.mappedPathWritable
+    ) {
+      return kinds.SUCCESS;
+    }
+
+    return kinds.WARNING;
+  }
+
   if (
     testResult.downloadClientPathMatched &&
     testResult.downloadClientItemPathChecked &&
@@ -109,7 +131,7 @@ function EditRemotePathMappingModalContent(props) {
     isTesting,
     testError,
     testResult,
-    showAdvancedScope,
+    advancedSettings,
     item,
     downloadClientHosts,
     downloadClientOptions,
@@ -131,7 +153,7 @@ function EditRemotePathMappingModalContent(props) {
     localPath
   } = item;
   const isDownloadClientScoped = downloadClientId.value > 0;
-  const showDownloadClientScope = showAdvancedScope || isDownloadClientScoped;
+  const showDownloadClientScope = advancedSettings || isDownloadClientScoped;
 
   return (
     <ModalContent onModalClose={onModalClose}>
@@ -289,7 +311,7 @@ function EditRemotePathMappingModalContent(props) {
         </Button>
 
         <AdvancedSettingsButton
-          advancedSettings={showDownloadClientScope}
+          advancedSettings={advancedSettings}
           onAdvancedSettingsPress={onAdvancedScopePress}
           showLabel={false}
         />
@@ -330,7 +352,7 @@ EditRemotePathMappingModalContent.propTypes = {
   isTesting: PropTypes.bool.isRequired,
   testError: PropTypes.object,
   testResult: PropTypes.object,
-  showAdvancedScope: PropTypes.bool.isRequired,
+  advancedSettings: PropTypes.bool.isRequired,
   item: PropTypes.shape(remotePathMappingShape).isRequired,
   downloadClientHosts: PropTypes.arrayOf(PropTypes.object).isRequired,
   downloadClientOptions: PropTypes.arrayOf(PropTypes.object).isRequired,

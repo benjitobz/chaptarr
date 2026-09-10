@@ -49,6 +49,7 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
         private const int V5AuthorMaxPages = 200;
         private const int V5AuthorMaxBooks = 20000;
         private static readonly TimeSpan V5AuthorRequestTimeout = TimeSpan.FromSeconds(60);
+        private static readonly TimeSpan V5AuthorSearchSummaryRequestTimeout = TimeSpan.FromSeconds(10);
         private static readonly TimeSpan HardcoverSearchCacheDuration = TimeSpan.FromMinutes(5);
 
         private readonly IHttpClient _httpClient;
@@ -796,6 +797,8 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
         private Author ConvertV5AuthorToDomain(V5.V5AuthorResponse v5Response, string originalAuthorId = null)
         {
             var authorData = v5Response.Author;
+            var born = authorData.BirthDate.ToValidAuthorDate();
+            var died = authorData.DeathDate.ToValidAuthorDate();
 
             var author = new Author
             {
@@ -809,7 +812,9 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
                     Votes = authorData.RatingCount,
                     Value = authorData.RatingAverage
                 },
-                Status = AuthorStatusType.Continuing
+                Born = born,
+                Died = died,
+                Status = AuthorExtensions.GetLifeStatus(died)
             };
 
                 // Parse and set provider ID from V5 API ID
@@ -944,14 +949,14 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
                 author.Aliases.Add(author.HardcoverAuthorId);
             }
 
-            // Set additional Author properties
+            // Set additional Author properties. Monitoring is configured by the
+            // add/import boundary; metadata conversion must not select book rows.
             author.CleanName = author.Name.CleanAuthorName();
-            author.Monitored = true;
-            // NEW SIMPLIFIED MONITORING SYSTEM - Will inherit from root folder
-            author.AudiobookMonitorExisting = null; // NULL = inherit from root folder
-            author.AudiobookMonitorFuture = null; // NULL = inherit from root folder
-            author.EbookMonitorExisting = null; // NULL = inherit from root folder
-            author.EbookMonitorFuture = null; // NULL = inherit from root folder
+            author.Monitored = false;
+            author.AudiobookMonitored = null;
+            author.EbookMonitored = null;
+            author.AudiobookMonitorNewItems = null;
+            author.EbookMonitorNewItems = null;
             author.Books = new List<Book>();
             author.Series = new List<Series>();
 
@@ -1642,7 +1647,8 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
                     Value = v5Book.RatingAverage
                 },
 
-                // Monitoring - inherit from author's per-type settings
+                // Monitoring is seeded by AuthorLibraryService from the explicit
+                // add/import action. Keep provider conversion neutral.
                 Monitored = false, // Legacy field for database compatibility
                 AudiobookMonitored = false, // Will be set based on media type
                 EbookMonitored = false, // Will be set based on media type
@@ -1663,34 +1669,6 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
 
             // Add genres with validation
             book.Genres = v5Book.Genres?.ValidateGenres(book.Title) ?? new List<string>();
-
-            // Set monitoring based on media type using new boolean system
-            if (mediaType == BookMediaType.Audiobook)
-            {
-                // Use author's AudiobookMonitorExisting setting if set
-                // For root folder discovery, this will be set from root folder settings
-                // For manual additions, this should be explicitly set (or false)
-                // Convert tri-state int? to bool for default monitoring: 0/2/NULL=false, 1=true
-                // "Selected" mode (2) should not auto-monitor new books; selections are persisted per-book.
-                bool shouldMonitor = (author?.AudiobookMonitorExisting ?? 0) == 1;
-                book.AudiobookMonitored = shouldMonitor;
-                book.EbookMonitored = false; // This is an audiobook instance
-                _logger.Trace("[MONITORING] Set audiobook instance monitored={0}, AudiobookMonitored={1} based on author's AudiobookMonitorExisting={2}",
-                    (book.AudiobookMonitored || book.EbookMonitored), book.AudiobookMonitored, author?.AudiobookMonitorExisting?.ToString() ?? "NULL-default-false");
-            }
-            else if (mediaType == BookMediaType.Ebook)
-            {
-                // Use author's EbookMonitorExisting setting if set
-                // For root folder discovery, this will be set from root folder settings  
-                // For manual additions, this should be explicitly set (or false)
-                // Convert tri-state int? to bool for default monitoring: 0/2/NULL=false, 1=true
-                // "Selected" mode (2) should not auto-monitor new books; selections are persisted per-book.
-                bool shouldMonitor = (author?.EbookMonitorExisting ?? 0) == 1;
-                book.AudiobookMonitored = false; // This is an ebook instance
-                book.EbookMonitored = shouldMonitor;
-                _logger.Trace("[MONITORING] Set ebook instance monitored={0}, EbookMonitored={1} based on author's EbookMonitorExisting={2}",
-                    (book.AudiobookMonitored || book.EbookMonitored), book.EbookMonitored, author?.EbookMonitorExisting?.ToString() ?? "NULL-default-false");
-            }
 
             // Add external links
             if (v5Book.Links != null && v5Book.Links.Any())
@@ -2383,6 +2361,8 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
                     _logger.Debug($"[BookInfoProxy] Hardcover mapped results: {mapped.Count}");
 
                     var filtered = FilterHardcoverSearchResultsPreservingOrder(mapped, title);
+                    ApplyAuthorSearchSummaries(filtered.OfType<Author>(), "hardcover");
+
                     _logger.Debug($"[BookInfoProxy] Hardcover filtered results: {filtered.Count}");
                     return filtered;
                 }
@@ -2424,18 +2404,10 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
                 foreach (var author in authors)
                 {
                     EnsureGoodreadsAuthorLink(author);
-
-                    var authorId = GetAuthorMetadataKey(author);
-                    var enriched = TryGetAuthorInfoFromV5ForSearch(authorId);
-                    if (enriched != null)
-                    {
-                        author.UseMetadataFrom(enriched);
-                    }
-
-                    EnsureGoodreadsAuthorLink(author);
-                    result.Add(author);
                 }
 
+                ApplyAuthorSearchSummaries(authors, "goodreads");
+                result.AddRange(authors);
                 result.AddRange(books.Cast<object>());
             }
 
@@ -2950,6 +2922,8 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
                     Name = metadata.Name,
                     TitleSlug = metadata.TitleSlug,
                     Status = metadata.Status,
+                    Born = metadata.Born,
+                    Died = metadata.Died,
                     Overview = metadata.Overview,
                     Images = metadata.Images,
                     Links = metadata.Links,
@@ -3829,7 +3803,9 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
 
             private static void EnsureGoodreadsAuthorLink(Author author)
             {
-            if (author == null)
+            if (author == null || author.Links?.Any(link =>
+                link?.Url.IsValidHttpUrl() == true &&
+                link.Url.Contains("goodreads.com/author/show", StringComparison.OrdinalIgnoreCase)) == true)
             {
                 return;
             }
@@ -3859,28 +3835,6 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
             }
 
             author.Links ??= new List<Links>();
-
-            var existingIndex = author.Links.FindIndex(l =>
-                l != null &&
-                !string.IsNullOrWhiteSpace(l.Url) &&
-                l.Url.Contains("goodreads.com/author/show", StringComparison.OrdinalIgnoreCase));
-
-            if (existingIndex >= 0)
-            {
-                var existing = author.Links[existingIndex];
-                existing.Name = string.IsNullOrWhiteSpace(existing.Name) ? "goodreads" : existing.Name;
-                existing.Url = url;
-
-                // Ensure Goodreads is the primary external link for Goodreads authors.
-                if (existingIndex != 0)
-                {
-                    author.Links.RemoveAt(existingIndex);
-                    author.Links.Insert(0, existing);
-                }
-
-                return;
-            }
-
             author.Links.Insert(0, new Links { Name = "goodreads", Url = url });
             }
 
@@ -3948,6 +3902,12 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
 
             [JsonProperty("description")]
             public string Description { get; set; }
+
+            [JsonProperty("birthDate")]
+            public string BirthDate { get; set; }
+
+            [JsonProperty("deathDate")]
+            public string DeathDate { get; set; }
 
             [JsonProperty("status")]
             public string Status { get; set; }
@@ -4232,13 +4192,17 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
             var name = v5Author.Name ?? v5Author.AuthorName; // V5 API uses 'name' field
             var cleanName = Parser.Parser.CleanAuthorName(name);
             var sortName = name?.ToLower() ?? string.Empty;
+            var born = v5Author.BirthDate.ToValidAuthorDate();
+            var died = v5Author.DeathDate.ToValidAuthorDate();
 
             var author = new Author
             {
                 Name = name,
                 TitleSlug = v5Author.TitleSlug,
                 SortName = sortName,
-                Status = ParseAuthorStatus(v5Author.Status),
+                Born = born,
+                Died = died,
+                Status = AuthorExtensions.GetLifeStatus(died),
                 Overview = v5Author.Description,
                 Images = new List<MediaCover.MediaCover>(),
                 Links = new List<Links>(),
@@ -4246,11 +4210,12 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
                 CleanName = cleanName,
                 Path = cleanName,
                 Monitored = false,
-                // Use NULL for inheritance from root folder
-                AudiobookMonitorExisting = null,
-                AudiobookMonitorFuture = null,
-                EbookMonitorExisting = null,
-                EbookMonitorFuture = null
+                // NULL means the media side is unconfigured until the add/import
+                // boundary applies its explicit monitoring settings.
+                AudiobookMonitored = null,
+                AudiobookMonitorNewItems = null,
+                EbookMonitored = null,
+                EbookMonitorNewItems = null
             };
 
             // Parse and set provider ID from V5 API ID
@@ -4517,12 +4482,16 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
         private Author ConvertHardcoverAuthor(Hardcover.HardcoverAuthorResult a)
         {
             var name = a?.Name ?? string.Empty;
+            var born = a?.BornDate.ToValidAuthorDate();
+            var died = a?.DeathDate.ToValidAuthorDate();
             var author = new Author
             {
                 Name = name,
                 TitleSlug = !string.IsNullOrWhiteSpace(a?.Slug) ? a.Slug : $"hc:{a?.Id}",
                 Overview = a?.Bio ?? string.Empty,
-                Status = AuthorStatusType.Continuing,
+                Born = born,
+                Died = died,
+                Status = AuthorExtensions.GetLifeStatus(died),
                 CleanName = Parser.Parser.CleanAuthorName(name),
                 SortName = name.ToLowerInvariant(),
                 NameLastFirst = name.ToLastFirst(),
@@ -4531,10 +4500,10 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
                 Images = new List<MediaCover.MediaCover>(),
                 Links = new List<Links>(),
                 Monitored = false,
-                AudiobookMonitorExisting = null,
-                AudiobookMonitorFuture = null,
-                EbookMonitorExisting = null,
-                EbookMonitorFuture = null
+                AudiobookMonitored = null,
+                AudiobookMonitorNewItems = null,
+                EbookMonitored = null,
+                EbookMonitorNewItems = null
             };
 
             // Provider ID
@@ -4712,23 +4681,6 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
             return series;
         }
 
-        private AuthorStatusType ParseAuthorStatus(string status)
-        {
-            if (string.IsNullOrEmpty(status))
-            {
-                return AuthorStatusType.Continuing;
-            }
-
-            switch (status.ToLower())
-            {
-                case "ended":
-                case "deceased":
-                    return AuthorStatusType.Ended;
-                default:
-                    return AuthorStatusType.Continuing;
-            }
-        }
-
         private MediaCoverTypes ParseCoverType(string coverType)
         {
             if (string.IsNullOrEmpty(coverType))
@@ -4901,10 +4853,10 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
                     // Only emit Amazon/Audible author IDs when the upstream payload actually provides one.
                     AudnexusAuthorId = !string.IsNullOrWhiteSpace(normalizedAuthorAsin) ? $"az:{normalizedAuthorAsin}" : null,
                     Monitored = false,
-                    AudiobookMonitorExisting = null,
-                    AudiobookMonitorFuture = null,
-                    EbookMonitorExisting = null,
-                    EbookMonitorFuture = null,
+                    AudiobookMonitored = null,
+                    AudiobookMonitorNewItems = null,
+                    EbookMonitored = null,
+                    EbookMonitorNewItems = null,
                     Ratings = new Ratings { Value = 0, Votes = 0 },
                     Images = new List<MediaCover.MediaCover>(),
                     Links = new List<Links>()
@@ -4988,40 +4940,70 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
                 .DistinctBy(a => GetAuthorMetadataKey(a))
                 .ToList();
 
-            foreach (var author in authors)
-            {
-                var authorId = GetAuthorMetadataKey(author);
-                var enriched = TryGetAuthorInfoFromV5ForSearch(authorId);
-                if (enriched != null)
-                {
-                    author.UseMetadataFrom(enriched);
-                }
-
-                results.Add(author);
-            }
+            ApplyAuthorSearchSummaries(authors, "audible");
+            results.AddRange(authors.Cast<object>());
 
             // Then the books
             results.AddRange(books.Cast<object>());
             return results;
             }
 
-            private Author TryGetAuthorInfoFromV5ForSearch(string prefixedAuthorId)
+            private void ApplyAuthorSearchSummaries(IEnumerable<Author> authors, string searchProvider)
+            {
+            var candidates = authors?.ToList() ?? new List<Author>();
+            var stopwatch = Stopwatch.StartNew();
+
+            foreach (var author in candidates)
+            {
+                if (stopwatch.Elapsed >= V5AuthorSearchSummaryRequestTimeout)
+                {
+                    _logger.Debug("V5 author summary enrichment reached its time budget for {0}", searchProvider);
+                    break;
+                }
+
+                if (!_metadataServerHealthGate.CanAttemptWithoutProbe(out _))
+                {
+                    _logger.Debug("Skipping optional V5 author summary enrichment while the metadata server circuit is open");
+                    break;
+                }
+
+                var authorId = GetAuthorMetadataKey(author);
+                ApplyAuthorSearchSummary(author, TryGetAuthorSummaryFromV5ForSearch(authorId), searchProvider);
+            }
+            }
+
+            private V5.V5AuthorSearchSummary TryGetAuthorSummaryFromV5ForSearch(string prefixedAuthorId)
             {
             if (string.IsNullOrWhiteSpace(prefixedAuthorId) || !prefixedAuthorId.Contains(":"))
             {
                 return null;
             }
 
-            var cacheKey = $"v5-search-author:{prefixedAuthorId}";
+            var cacheKey = $"v5-search-author-summary:{prefixedAuthorId}";
 
             try
             {
                 return _authorCache.GetOrAdd(cacheKey,
                     () =>
                     {
-                        // V5 payload is authoritative for author bio/images/provider URLs.
-                        // Let failures escape the factory so LazyCache never stores a null/error.
-                        return GetAuthorInfoFromV5(prefixedAuthorId, useCache: false, importAllWorks: false)
+                        var metadataServerUrl = _configService.MetadataServerUrl;
+                        var url = $"{metadataServerUrl}/api/v5/author/summary/{Uri.EscapeDataString(prefixedAuthorId)}";
+                        var request = new HttpRequestBuilder(url)
+                            .SetHeader("User-Agent", "Chaptarr/2.0")
+                            .Accept(HttpAccept.Json)
+                            .Build();
+                        request.RequestTimeout = V5AuthorSearchSummaryRequestTimeout;
+
+                        // Search-card enrichment is optional. It observes the shared circuit
+                        // before starting, but must not open it and block author refreshes,
+                        // book lookups, or import-list sync when this cosmetic request fails.
+                        var response = _httpClient.Get(request);
+                        if (response.StatusCode != HttpStatusCode.OK || response.HasHttpError)
+                        {
+                            throw new AuthorNotFoundException(prefixedAuthorId);
+                        }
+
+                        return JsonConvert.DeserializeObject<V5.V5AuthorSearchSummary>(response.Content, SerializerSettings)
                             ?? throw new AuthorNotFoundException(prefixedAuthorId);
                     },
                     new LazyCacheEntryOptions
@@ -5037,6 +5019,96 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
                 _logger.Debug(ex, "V5 author cache lookup failed for {0}", prefixedAuthorId);
                 return null;
             }
+            }
+
+            private static void ApplyAuthorSearchSummary(Author author, V5.V5AuthorSearchSummary summary, string searchProvider)
+            {
+            if (author == null || summary == null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(summary.Name))
+            {
+                author.Name = summary.Name.Trim();
+                author.CleanName = Parser.Parser.CleanAuthorName(author.Name);
+                author.SortName = author.Name.ToLowerInvariant();
+                author.NameLastFirst = author.Name.ToLastFirst();
+                author.SortNameLastFirst = author.NameLastFirst.ToLowerInvariant();
+            }
+
+            if (!string.IsNullOrWhiteSpace(summary.Description))
+            {
+                author.Overview = summary.Description;
+            }
+
+            author.Born = summary.BirthDate.ToValidAuthorDate() ?? author.Born;
+            author.Died = summary.DeathDate.ToValidAuthorDate() ?? author.Died;
+            author.Status = AuthorExtensions.GetLifeStatus(author.Died);
+            author.MetadataBookCount = summary.BookCount;
+
+            var existingPhotos = MediaCoverRendition.SelectCandidates(author.Images).ToList();
+            var summaryPhotos = (summary.Photos ?? new List<V5.V5AuthorSearchPhoto>())
+                .Where(photo => photo?.Url.IsValidHttpUrl() == true &&
+                                !MediaCoverRendition.IsKnownPlaceholderImageUrl(photo.Url))
+                .OrderBy(photo => IsPhotoFromSearchProvider(photo.Provider, searchProvider) ? 0 : 1)
+                .ThenByDescending(photo => photo.IsPrimary)
+                .Select(photo => new MediaCover.MediaCover
+                {
+                    Url = string.Equals(photo.Provider, "goodreads", StringComparison.OrdinalIgnoreCase)
+                        ? EnhanceGoodreadsImageUrl(photo.Url)
+                        : photo.Url,
+                    CoverType = MediaCoverTypes.Poster
+                });
+
+            author.Images = existingPhotos
+                .Concat(summaryPhotos)
+                .Where(photo => photo?.Url.IsValidHttpUrl() == true &&
+                                !MediaCoverRendition.IsKnownPlaceholderImageUrl(photo.Url))
+                .DistinctBy(photo => photo.Url.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var existingLinks = author.Links ?? new List<Links>();
+            var providerUrls = summary.ProviderUrls?.ValidateProviderUrls() ?? new ProviderUrlMap();
+            var summaryLinks = providerUrls
+                .Where(link => !string.Equals(link.Key, "_metadata", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(link => IsPhotoFromSearchProvider(link.Key, searchProvider) ? 0 : 1)
+                .ThenBy(link => link.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(link => new Links
+                {
+                    Name = link.Key.Trim().ToLowerInvariant(),
+                    Url = link.Value.Trim()
+                });
+
+            // Summary URLs replace search-generated links for the same provider. The candidate's
+            // lookup ID is left as the search returned it; the server resolves aliases.
+            author.Links = summaryLinks
+                .Concat(existingLinks.Where(link => !providerUrls.ContainsKey(link?.Name?.Trim() ?? string.Empty)))
+                .Where(link => link?.Url.IsValidHttpUrl() == true)
+                .DistinctBy(link => link.Url.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var remoteProviderIds = author.RemoteProviderIds ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var providerId in EnumerateProviderAliases(summary.ProviderIdsAll))
+            {
+                remoteProviderIds.Add(providerId);
+            }
+
+            author.RemoteProviderIds = remoteProviderIds.Count > 0 ? remoteProviderIds : null;
+            }
+
+            private static bool IsPhotoFromSearchProvider(string photoProvider, string searchProvider)
+            {
+            photoProvider = photoProvider?.Trim().ToLowerInvariant();
+            searchProvider = searchProvider?.Trim().ToLowerInvariant();
+
+            return searchProvider switch
+            {
+                "hardcover" => photoProvider == "hardcover",
+                "goodreads" => photoProvider == "goodreads",
+                "audible" => photoProvider is "audnexus" or "audible" or "amazon",
+                _ => false
+            };
             }
 
         // Helper method to set provider-specific IDs on Author
@@ -5614,12 +5686,16 @@ namespace NzbDrone.Core.MetadataSource.BookInfo
 
         private Author MapV5Author(V5Resource.V5Author v5Author, Logger logger)
         {
+            var born = v5Author.BirthDate.ToValidAuthorDate();
+            var died = v5Author.DeathDate.ToValidAuthorDate();
             var author = new Author
             {
                 Name = v5Author.Name?.CleanSpaces() ?? "",
                 Overview = v5Author.Biography,
                 TitleSlug = null,
-                Status = AuthorStatusType.Continuing
+                Born = born,
+                Died = died,
+                Status = AuthorExtensions.GetLifeStatus(died)
             };
 
             // `providerIds` is the legacy primary/scalar map. `providerIdsAll`

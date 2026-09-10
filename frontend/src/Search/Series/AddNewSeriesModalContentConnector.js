@@ -1,18 +1,20 @@
 import React, { Component } from 'react';
 import { connect } from 'react-redux';
 import { createSelector } from 'reselect';
-import createDimensionsSelector from 'Store/Selectors/createDimensionsSelector';
-import createRootFolderDefaultsSelector from 'Store/Selectors/createRootFolderDefaultsSelector';
-import createSystemStatusSelector from 'Store/Selectors/createSystemStatusSelector';
-import createAjaxRequest from 'Utilities/createAjaxRequest';
-import selectSettings from 'Store/Selectors/selectSettings';
-import { setAuthorAddDefault } from 'Store/Actions/searchActions';
 import { showMessage } from 'Store/Actions/appActions';
+import { setAuthorAddDefault } from 'Store/Actions/searchActions';
 import {
   fetchRootFolders,
   saveUISettings,
   setUISettingsValue
 } from 'Store/Actions/settingsActions';
+import createDimensionsSelector from 'Store/Selectors/createDimensionsSelector';
+import createRootFolderDefaultsSelector from 'Store/Selectors/createRootFolderDefaultsSelector';
+import createSystemStatusSelector from 'Store/Selectors/createSystemStatusSelector';
+import selectSettings from 'Store/Selectors/selectSettings';
+import { normalizeMonitorNewItemsOption } from 'Utilities/Author/monitorNewItemsOptions';
+import { normalizeMonitorOption, resolveMonitorOption } from 'Utilities/Author/monitorOptions';
+import createAjaxRequest from 'Utilities/createAjaxRequest';
 import AddNewSeriesModalContent from './AddNewSeriesModalContent';
 
 function createMapStateToProps() {
@@ -31,7 +33,7 @@ function createMapStateToProps() {
         addError,
         authorDefaults
       } = search;
-      
+
       const {
         settings,
         validationErrors,
@@ -41,7 +43,7 @@ function createMapStateToProps() {
       // Defensive defaults for legacy/empty persisted state
       if (!settings.monitor) {
         settings.monitor = {
-          value: 'all',
+          value: 'none',
           errors: [],
           warnings: []
         };
@@ -49,7 +51,7 @@ function createMapStateToProps() {
 
       if (!settings.monitorNewItems) {
         settings.monitorNewItems = {
-          value: 'all',
+          value: 'none',
           errors: [],
           warnings: []
         };
@@ -80,23 +82,6 @@ function createMapStateToProps() {
 
         const rootFolders = rootFoldersState.items || [];
 
-        const monitorExistingToKey = (monitorExisting) => {
-          // 0=None, 1=All, 2=Selected
-          if (monitorExisting === 1) {
-            return 'all';
-          }
-
-          if (monitorExisting === 2) {
-            return 'select';
-          }
-
-          return 'none';
-        };
-
-        const monitorFutureToKey = (monitorFuture) => {
-          return monitorFuture ? 'all' : 'none';
-        };
-
         const audiobookRoot = settings.audiobookRootFolderPath?.value;
         const ebookRoot = settings.ebookRootFolderPath?.value;
 
@@ -106,28 +91,46 @@ function createMapStateToProps() {
         if (!settings.audiobookMonitor && audiobookRootFolder) {
           settings.audiobookMonitor = {
             ...(settings.audiobookMonitor || {}),
-            value: monitorExistingToKey(audiobookRootFolder.audiobookMonitorExisting)
+            value: resolveMonitorOption(
+              audiobookRootFolder.audiobookMonitorExistingMode,
+              audiobookRootFolder.audiobookMonitorExistingBooks
+            )
+          };
+        }
+
+        if (!settings.audiobookMonitored && audiobookRootFolder) {
+          settings.audiobookMonitored = {
+            value: audiobookRootFolder.audiobookMonitored !== false
           };
         }
 
         if (!settings.audiobookMonitorNewItems && audiobookRootFolder) {
           settings.audiobookMonitorNewItems = {
             ...(settings.audiobookMonitorNewItems || {}),
-            value: monitorFutureToKey(audiobookRootFolder.audiobookMonitorFuture)
+            value: normalizeMonitorNewItemsOption(audiobookRootFolder.audiobookMonitorNewItems)
           };
         }
 
         if (!settings.ebookMonitor && ebookRootFolder) {
           settings.ebookMonitor = {
             ...(settings.ebookMonitor || {}),
-            value: monitorExistingToKey(ebookRootFolder.ebookMonitorExisting)
+            value: resolveMonitorOption(
+              ebookRootFolder.ebookMonitorExistingMode,
+              ebookRootFolder.ebookMonitorExistingBooks
+            )
+          };
+        }
+
+        if (!settings.ebookMonitored && ebookRootFolder) {
+          settings.ebookMonitored = {
+            value: ebookRootFolder.ebookMonitored !== false
           };
         }
 
         if (!settings.ebookMonitorNewItems && ebookRootFolder) {
           settings.ebookMonitorNewItems = {
             ...(settings.ebookMonitorNewItems || {}),
-            value: monitorFutureToKey(ebookRootFolder.ebookMonitorFuture)
+            value: normalizeMonitorNewItemsOption(ebookRootFolder.ebookMonitorNewItems)
           };
         }
 
@@ -202,7 +205,7 @@ function createMapStateToProps() {
       }
 
       const isFetchingSettings = rootFoldersState.isFetching;
-      
+
       return {
         isSmallScreen: dimensions.isSmallScreen,
         isAdding,
@@ -271,14 +274,14 @@ class AddNewSeriesModalContentConnector extends Component {
       this._pendingDefaultSave = false;
     }
   }
-  
+
   componentDidMount() {
     const {
       rootFoldersPopulated,
       isFetchingSettings,
       fetchRootFolders
     } = this.props;
-    
+
     if (!rootFoldersPopulated && !isFetchingSettings) {
       fetchRootFolders();
     }
@@ -341,7 +344,7 @@ class AddNewSeriesModalContentConnector extends Component {
       });
     });
   };
-  
+
   onInputChange = ({ name, value }) => {
     this.props.setAuthorAddDefault({ [name]: value });
   };
@@ -402,6 +405,8 @@ class AddNewSeriesModalContentConnector extends Component {
       audiobookMetadataProfileId,
       ebookMetadataProfileId,
       monitor,
+      audiobookMonitored,
+      ebookMonitored,
       audiobookMonitor,
       ebookMonitor,
       monitorNewItems,
@@ -425,56 +430,38 @@ class AddNewSeriesModalContentConnector extends Component {
       return parsed;
     };
 
-    const normalizeMonitorExisting = (value) => {
-      const normalized = (value ?? '').toString().trim().toLowerCase();
-
-      if (normalized === 'all') {
-        return 'all';
-      }
-
-      if (normalized === 'select' || normalized === 'specificbook') {
-        return 'select';
-      }
-
-      if (normalized === 'none') {
-        return 'none';
-      }
-
-      // Legacy monitor options (existing/missing) map closest to "All" for series adds.
-      if (normalized === 'existing' || normalized === 'missing') {
-        return 'all';
-      }
-
-      return 'all';
-    };
-
-    const monitorFutureFromUi = (uiValue) => {
-      return (uiValue ?? '').toString().trim().toLowerCase() === 'all';
-    };
-
     const buildPayloadForMediaType = (mediaType) => {
       const isAudiobook = mediaType === 'audiobook';
       const monitorExistingUi = isAudiobook ? (audiobookMonitor?.value || monitor?.value) : (ebookMonitor?.value || monitor?.value);
-      const monitorExisting = normalizeMonitorExisting(monitorExistingUi);
+      const normalizedMonitorExistingUi = (monitorExistingUi ?? '').toString().trim().toLowerCase();
+      const monitorExisting = normalizedMonitorExistingUi === 'specificbook' ?
+        'specificbook' : normalizeMonitorOption(normalizedMonitorExistingUi);
 
-      const monitorNewItemsUi = isAudiobook
-        ? (audiobookMonitorNewItems?.value || monitorNewItems?.value)
-        : (ebookMonitorNewItems?.value || monitorNewItems?.value);
-      const monitorFuture = monitorFutureFromUi(monitorNewItemsUi);
+      const monitorNewItemsUi = normalizeMonitorNewItemsOption(isAudiobook ?
+        (audiobookMonitorNewItems?.value || monitorNewItems?.value) :
+        (ebookMonitorNewItems?.value || monitorNewItems?.value));
 
-      const selectedTags = isAudiobook
-        ? (audiobookTags?.value || tags?.value)
-        : (ebookTags?.value || tags?.value);
+      const selectedTags = isAudiobook ?
+        (audiobookTags?.value || tags?.value) :
+        (ebookTags?.value || tags?.value);
 
       const payload = {
         foreignSeriesId,
         selectedMediaType: mediaType,
         selectedBooks,
-        monitorExisting,
-        monitorFuture,
-        monitorAllBooksByAllAuthors: monitorExisting === 'all',
+        monitor: monitorExisting,
         tags: selectedTags
       };
+
+      if (isAudiobook) {
+        payload.audiobookMonitored = audiobookMonitored?.value !== false;
+        payload.audiobookMonitorExistingMode = monitorExisting;
+        payload.audiobookMonitorNewItems = monitorNewItemsUi;
+      } else {
+        payload.ebookMonitored = ebookMonitored?.value !== false;
+        payload.ebookMonitorExistingMode = monitorExisting;
+        payload.ebookMonitorNewItems = monitorNewItemsUi;
+      }
 
       if (mediaType === 'audiobook') {
         const rootFolderPath = audiobookRootFolderPath?.value;
@@ -669,7 +656,7 @@ class AddNewSeriesModalContentConnector extends Component {
       handleFailure(error);
     });
   };
-  
+
   render() {
     const { isFetchingSettings } = this.props;
     const { isFetchingSeries, seriesDetails, fetchError } = this.state;
