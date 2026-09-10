@@ -78,6 +78,7 @@ class AddNewAuthorSearchResult extends Component {
       disambiguation,
       status,
       overview,
+      metadataBookCount,
       ratings,
       folder,
       images,
@@ -92,8 +93,6 @@ class AddNewAuthorSearchResult extends Component {
     } = this.state;
 
     const linkProps = isExistingAuthor ? { to: `/author/${authorId}` } : { onPress: this.onPress };
-
-    const endedString = 'Deceased';
 
     const height = calculateHeight(230, isSmallScreen);
     const foreignProvider = (foreignAuthorId || '').toLowerCase().includes(':') ?
@@ -199,12 +198,20 @@ class AddNewAuthorSearchResult extends Component {
               }
 
               {
+                metadataBookCount == null ?
+                  null :
+                  <Label size={sizes.LARGE}>
+                    {translate(metadataBookCount === 1 ? 'BookCountMessage' : 'BooksCountMessage', { count: metadataBookCount })}
+                  </Label>
+              }
+
+              {
                 status === 'ended' ?
                   <Label
                     kind={kinds.DANGER}
                     size={sizes.LARGE}
                   >
-                    {endedString}
+                    {translate('Dead')}
                   </Label> :
                   null
               }
@@ -250,6 +257,7 @@ AddNewAuthorSearchResult.propTypes = {
   disambiguation: PropTypes.string,
   status: PropTypes.string.isRequired,
   overview: PropTypes.string,
+  metadataBookCount: PropTypes.number,
   ratings: PropTypes.object.isRequired,
   folder: PropTypes.string.isRequired,
   images: PropTypes.arrayOf(PropTypes.object).isRequired,

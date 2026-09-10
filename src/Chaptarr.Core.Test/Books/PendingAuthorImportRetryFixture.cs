@@ -148,6 +148,108 @@ namespace Chaptarr.Core.Test.Books
         }
 
         [Test]
+        public async Task pending_import_should_persist_and_update_the_last_requested_media_type()
+        {
+            var repository = DispatchProxy.Create<IPendingAuthorImportRepository, RepositoryProxy>();
+            var repositoryProxy = (RepositoryProxy)repository;
+            var authorService = DispatchProxy.Create<IAuthorService, AuthorServiceProxy>();
+            var subject = new PendingAuthorImportService(
+                repository,
+                authorService,
+                new RecordingEventAggregator(),
+                LogManager.GetCurrentClassLogger());
+
+            await subject.EnqueueAsync(
+                "gr:123",
+                new MonitoringConfig
+                {
+                    CreateAudiobook = true,
+                    LastSelectedMediaType = "audiobook"
+                },
+                "test");
+
+            Assert.That(repositoryProxy.Inserted.LastSelectedMediaType, Is.EqualTo("audiobook"));
+
+            repositoryProxy.Active = repositoryProxy.Inserted;
+            await subject.EnqueueAsync(
+                "gr:123",
+                new MonitoringConfig
+                {
+                    CreateEbook = true,
+                    LastSelectedMediaType = "ebook"
+                },
+                "test");
+
+            Assert.That(repositoryProxy.Updated.LastSelectedMediaType, Is.EqualTo("ebook"));
+        }
+
+        [Test]
+        public async Task pending_import_should_preserve_distinct_media_tags_and_explicit_empty_sets()
+        {
+            var repository = DispatchProxy.Create<IPendingAuthorImportRepository, RepositoryProxy>();
+            var repositoryProxy = (RepositoryProxy)repository;
+            var authorService = DispatchProxy.Create<IAuthorService, AuthorServiceProxy>();
+            var subject = new PendingAuthorImportService(
+                repository,
+                authorService,
+                new RecordingEventAggregator(),
+                LogManager.GetCurrentClassLogger());
+
+            await subject.EnqueueAsync(
+                "gr:123",
+                new MonitoringConfig
+                {
+                    CreateAudiobook = true,
+                    CreateEbook = true,
+                    AudiobookTags = new HashSet<int> { 2, 1 },
+                    EbookTags = new HashSet<int>(),
+                    Tags = new HashSet<int> { 99 }
+                },
+                "test");
+
+            Assert.That(repositoryProxy.Inserted.AudiobookTags, Is.EqualTo("[1,2]"));
+            Assert.That(repositoryProxy.Inserted.EbookTags, Is.EqualTo("[]"));
+            Assert.That(repositoryProxy.Inserted.Tags, Is.EqualTo("[99]"));
+        }
+
+        [Test]
+        public async Task concurrent_pending_requests_should_union_tags_without_crossing_media_sides()
+        {
+            var repository = DispatchProxy.Create<IPendingAuthorImportRepository, RepositoryProxy>();
+            var repositoryProxy = (RepositoryProxy)repository;
+            var authorService = DispatchProxy.Create<IAuthorService, AuthorServiceProxy>();
+            var subject = new PendingAuthorImportService(
+                repository,
+                authorService,
+                new RecordingEventAggregator(),
+                LogManager.GetCurrentClassLogger());
+
+            await subject.EnqueueAsync(
+                "gr:123",
+                new MonitoringConfig
+                {
+                    CreateAudiobook = true,
+                    CreateEbook = true,
+                    AudiobookTags = new HashSet<int> { 1 },
+                    EbookTags = new HashSet<int> { 20 }
+                },
+                "test");
+
+            repositoryProxy.Active = repositoryProxy.Inserted;
+            await subject.EnqueueAsync(
+                "gr:123",
+                new MonitoringConfig
+                {
+                    CreateAudiobook = true,
+                    AudiobookTags = new HashSet<int> { 2 }
+                },
+                "test");
+
+            Assert.That(repositoryProxy.Active.AudiobookTags, Is.EqualTo("[1,2]"));
+            Assert.That(repositoryProxy.Active.EbookTags, Is.EqualTo("[20]"));
+        }
+
+        [Test]
         public async Task pending_import_should_persist_and_merge_media_specific_book_searches()
         {
             var repository = DispatchProxy.Create<IPendingAuthorImportRepository, RepositoryProxy>();
@@ -165,6 +267,8 @@ namespace Chaptarr.Core.Test.Books
                 {
                     CreateAudiobook = true,
                     CreateEbook = false,
+                    AudiobookMonitored = true,
+                    AudiobookMonitorNewItems = NewItemMonitorTypes.None,
                     AudiobookBooksToSearch = new List<string> { "gr:1001" },
                     AudiobookBooksToMonitor = new List<string> { "gr:3001" }
                 },
@@ -177,6 +281,7 @@ namespace Chaptarr.Core.Test.Books
                 {
                     CreateAudiobook = true,
                     CreateEbook = true,
+                    AudiobookMonitored = true,
                     AudiobookBooksToSearch = new List<string> { "GR:1001", "gr:1002" },
                     AudiobookBooksToMonitor = new List<string> { "GR:3001", "gr:3002" },
                     EbookBooksToSearch = new List<string> { "gr:2001" },
@@ -189,8 +294,65 @@ namespace Chaptarr.Core.Test.Books
             Assert.That(repositoryProxy.Updated, Is.SameAs(repositoryProxy.Active));
             Assert.That(repositoryProxy.Active.AudiobookBooksToSearch, Is.EqualTo("[\"gr:1001\",\"gr:1002\"]"));
             Assert.That(repositoryProxy.Active.AudiobookBooksToMonitor, Is.EqualTo("[\"gr:3001\",\"gr:3002\"]"));
+            Assert.That(repositoryProxy.Active.AudiobookMonitored, Is.True);
+            Assert.That(repositoryProxy.Active.AudiobookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.None));
             Assert.That(repositoryProxy.Active.EbookBooksToSearch, Is.EqualTo("[\"gr:2001\"]"));
             Assert.That(repositoryProxy.Active.SearchForMissingBooks, Is.True);
+        }
+
+        [Test]
+        public async Task pending_import_should_keep_current_book_seed_separate_from_new_item_policy()
+        {
+            var repository = DispatchProxy.Create<IPendingAuthorImportRepository, RepositoryProxy>();
+            var repositoryProxy = (RepositoryProxy)repository;
+            var authorService = DispatchProxy.Create<IAuthorService, AuthorServiceProxy>();
+            var subject = new PendingAuthorImportService(
+                repository,
+                authorService,
+                new RecordingEventAggregator(),
+                LogManager.GetCurrentClassLogger());
+
+            await subject.EnqueueAsync(
+                "gr:124",
+                new MonitoringConfig
+                {
+                    CreateAudiobook = true,
+                    CreateEbook = true,
+                    AudiobookMonitored = true,
+                    AudiobookMonitorExistingMode = MonitorTypes.None,
+                    AudiobookMonitorNewItems = NewItemMonitorTypes.All,
+                    EbookMonitored = true,
+                    EbookMonitorExistingMode = MonitorTypes.All,
+                    EbookMonitorNewItems = NewItemMonitorTypes.None
+                },
+                "test");
+
+            Assert.That(repositoryProxy.Inserted.AudiobookMonitored, Is.True);
+            Assert.That(repositoryProxy.Inserted.AudiobookMonitorExistingMode, Is.EqualTo(MonitorTypes.None));
+            Assert.That(repositoryProxy.Inserted.AudiobookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.All));
+            Assert.That(repositoryProxy.Inserted.EbookMonitored, Is.True);
+            Assert.That(repositoryProxy.Inserted.EbookMonitorExistingMode, Is.EqualTo(MonitorTypes.All));
+            Assert.That(repositoryProxy.Inserted.EbookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.None));
+
+            // A later exact request may widen only the current-book seed side. It
+            // must not overwrite the independently saved new-item policy.
+            repositoryProxy.Active = repositoryProxy.Inserted;
+            await subject.EnqueueAsync(
+                "gr:124",
+                new MonitoringConfig
+                {
+                    CreateAudiobook = true,
+                    CreateEbook = false,
+                    AudiobookMonitored = true,
+                    AudiobookMonitorExistingMode = MonitorTypes.All,
+                    AudiobookMonitorNewItems = NewItemMonitorTypes.None
+                },
+                "test");
+
+            Assert.That(repositoryProxy.Active.AudiobookMonitorExistingMode, Is.EqualTo(MonitorTypes.All));
+            Assert.That(repositoryProxy.Active.AudiobookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.All));
+            Assert.That(repositoryProxy.Active.EbookMonitorExistingMode, Is.EqualTo(MonitorTypes.All));
+            Assert.That(repositoryProxy.Active.EbookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.None));
         }
 
         [Test]

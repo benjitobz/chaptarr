@@ -49,7 +49,7 @@ namespace NzbDrone.Core.Books
 
                 var booksWithFilesIds = booksWithFiles.Select(e => e.Id).ToHashSet();
                 var booksWithoutFiles = books
-                    .Where(c => !booksWithFilesIds.Contains(c.Id) && c.ReleaseDate <= DateTime.UtcNow)
+                    .Where(c => !booksWithFilesIds.Contains(c.Id))
                     .ToList();
                 var booksWithoutFilesIds = booksWithoutFiles.Select(e => e.Id).ToHashSet();
 
@@ -84,8 +84,10 @@ namespace NzbDrone.Core.Books
                         case MonitorTypes.Future:
                             _logger.Debug("Unmonitoring Books with Files");
                             ToggleBooksMonitoredState(books.Where(e => booksWithFilesIds.Contains(e.Id)), false);
-                            _logger.Debug("Unmonitoring Books without Files");
-                            ToggleBooksMonitoredState(books.Where(e => booksWithoutFilesIds.Contains(e.Id)), false);
+                            _logger.Debug("Unmonitoring released Books without Files");
+                            ToggleBooksMonitoredState(
+                                books.Where(e => booksWithoutFilesIds.Contains(e.Id) && e.ReleaseDate <= DateTime.UtcNow),
+                                false);
                             break;
                         case MonitorTypes.None:
                             ToggleBooksMonitoredState(books, false);
@@ -115,11 +117,9 @@ namespace NzbDrone.Core.Books
                     }
                 }
 
-                // Use individual update to ensure updates are sent to frontend
-                foreach (var book in books)
-                {
-                    _bookService.UpdateBook(book);
-                }
+                // Persist the monitoring decision as one batch while retaining each
+                // BookEditedEvent and the existing monitoring synchronization rules.
+                _bookService.UpdateManyWithLifecycle(books);
             }
 
             _authorService.UpdateAuthor(author);

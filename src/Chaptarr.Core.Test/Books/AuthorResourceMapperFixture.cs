@@ -8,6 +8,7 @@ using NLog.Config;
 using NLog.Targets;
 using NzbDrone.Core.Books;
 using NzbDrone.Core.MediaCover;
+using NzbDrone.Core.RootFolders;
 using NUnit.Framework;
 
 namespace Chaptarr.Core.Test.Books
@@ -16,7 +17,124 @@ namespace Chaptarr.Core.Test.Books
     public class AuthorResourceMapperFixture
     {
         [Test]
-        public void should_apply_tri_state_monitoring_fields_on_put_update()
+        public void should_map_legacy_single_fields_to_the_ebook_side_for_an_ebook_root_idempotently()
+        {
+            var resource = new AuthorResource
+            {
+                AuthorName = "Ted Chiang",
+                ForeignAuthorId = "gr:130698",
+                QualityProfileId = 1,
+                MetadataProfileId = 2,
+                RootFolderPath = "/ebooks",
+                Monitored = true,
+                MonitorNewItems = "all",
+                Tags = new HashSet<int> { 4 }
+            };
+            var ebookRoot = new RootFolder
+            {
+                Path = "/ebooks",
+                FolderType = FolderType.Ebook
+            };
+
+            AuthorResourceMapper.NormalizeLegacySingleFields(resource, null, ebookRoot);
+            AuthorResourceMapper.NormalizeLegacySingleFields(resource, null);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(resource.EbookQualityProfileId, Is.EqualTo(1));
+                Assert.That(resource.EbookMetadataProfileId, Is.EqualTo(2));
+                Assert.That(resource.EbookRootFolderPath, Is.EqualTo("/ebooks"));
+                Assert.That(resource.EbookMonitored, Is.True);
+                Assert.That(resource.EbookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.All));
+                Assert.That(resource.EbookTags, Is.EquivalentTo(new[] { 4 }));
+                Assert.That(resource.AudiobookQualityProfileId, Is.Null);
+                Assert.That(resource.AudiobookMetadataProfileId, Is.Null);
+                Assert.That(resource.AudiobookRootFolderPath, Is.Null);
+                Assert.That(resource.AudiobookMonitored, Is.Null);
+                Assert.That(resource.AudiobookMonitorNewItems, Is.Null);
+                Assert.That(resource.AudiobookTags, Is.Null);
+            });
+        }
+
+        [Test]
+        public void should_map_legacy_single_fields_to_both_sides_for_a_mixed_root()
+        {
+            var resource = new AuthorResource
+            {
+                QualityProfileId = 1,
+                MetadataProfileId = 2,
+                RootFolderPath = "/books",
+                Monitored = true
+            };
+
+            AuthorResourceMapper.NormalizeLegacySingleFields(resource, null, new RootFolder
+            {
+                Path = "/books",
+                FolderType = FolderType.Mixed
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(resource.AudiobookQualityProfileId, Is.EqualTo(1));
+                Assert.That(resource.EbookQualityProfileId, Is.EqualTo(1));
+                Assert.That(resource.AudiobookMetadataProfileId, Is.EqualTo(2));
+                Assert.That(resource.EbookMetadataProfileId, Is.EqualTo(2));
+                Assert.That(resource.AudiobookRootFolderPath, Is.EqualTo("/books"));
+                Assert.That(resource.EbookRootFolderPath, Is.EqualTo("/books"));
+            });
+        }
+
+        [Test]
+        public void should_normalize_last_selected_media_type_on_update()
+        {
+            var author = new AuthorResource
+            {
+                LastSelectedMediaType = " EBOOK "
+            }.ToModel();
+
+            Assert.That(author.LastSelectedMediaType, Is.EqualTo("ebook"));
+        }
+
+        [Test]
+        public void should_derive_ended_from_death_date_instead_of_status()
+        {
+            var datedResource = new AuthorResource
+            {
+                Status = AuthorStatusType.Continuing,
+                Died = new System.DateTime(1996, 7, 9)
+            };
+            var staleStatusResource = new AuthorResource
+            {
+                Status = AuthorStatusType.Ended
+            };
+
+            Assert.That(datedResource.Ended, Is.True);
+            Assert.That(staleStatusResource.Ended, Is.False);
+
+            var resource = new NzbDrone.Core.Books.Author
+            {
+                Status = AuthorStatusType.Continuing,
+                Died = new System.DateTime(1996, 7, 9)
+            }.ToResource();
+
+            Assert.That(resource.Status, Is.EqualTo(AuthorStatusType.Ended));
+        }
+
+        [Test]
+        public void should_expose_per_media_author_folders_without_controller_post_processing()
+        {
+            var resource = new NzbDrone.Core.Books.Author
+            {
+                AudiobookPath = "/audiobooks/Joe Abercrombie",
+                EbookPath = "/ebooks/Joe Abercrombie"
+            }.ToResource();
+
+            Assert.That(resource.AudiobookFolder, Is.EqualTo("/audiobooks/Joe Abercrombie"));
+            Assert.That(resource.EbookFolder, Is.EqualTo("/ebooks/Joe Abercrombie"));
+        }
+
+        [Test]
+        public void should_apply_binary_monitoring_fields_on_put_update()
         {
             var existing = new NzbDrone.Core.Books.Author
             {
@@ -27,10 +145,10 @@ namespace Chaptarr.Core.Test.Books
                 EbookRootFolderPath = "/ebooks",
                 AudiobookQualityProfileId = 2,
                 EbookQualityProfileId = 3,
-                AudiobookMonitorExisting = 2,
-                AudiobookMonitorFuture = true,
-                EbookMonitorExisting = 1,
-                EbookMonitorFuture = true
+                AudiobookMonitored = true,
+                AudiobookMonitorNewItems = NewItemMonitorTypes.New,
+                EbookMonitored = true,
+                EbookMonitorNewItems = NewItemMonitorTypes.New
             };
 
             var resource = new AuthorResource
@@ -42,24 +160,68 @@ namespace Chaptarr.Core.Test.Books
                 EbookRootFolderPath = "/ebooks",
                 AudiobookQualityProfileId = 2,
                 EbookQualityProfileId = 3,
-                AudiobookMonitorExisting = 0,
-                AudiobookMonitorFuture = false,
-                EbookMonitorExisting = 2,
-                EbookMonitorFuture = false
+                AudiobookMonitored = false,
+                AudiobookMonitorNewItems = NewItemMonitorTypes.None,
+                EbookMonitored = true,
+                EbookMonitorNewItems = NewItemMonitorTypes.None
             };
 
             var updated = resource.ToModel(existing);
 
-            Assert.That(updated.AudiobookMonitorExisting, Is.EqualTo(0));
-            Assert.That(updated.AudiobookMonitorFuture, Is.False);
-            Assert.That(updated.EbookMonitorExisting, Is.EqualTo(2));
-            Assert.That(updated.EbookMonitorFuture, Is.False);
+            Assert.That(updated.AudiobookMonitored, Is.False);
+            Assert.That(updated.AudiobookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.None));
+            Assert.That(updated.EbookMonitored, Is.True);
+            Assert.That(updated.EbookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.None));
             Assert.That(updated.AudiobookSettingsManuallyOverridden, Is.True);
             Assert.That(updated.EbookSettingsManuallyOverridden, Is.True);
         }
 
         [Test]
-        public void should_not_wipe_tri_state_monitoring_fields_when_not_provided_on_put_update()
+        public void should_translate_deprecated_per_media_monitoring_fields()
+        {
+            var resource = new AuthorResource
+            {
+                AudiobookMonitorExisting = 2,
+                AudiobookMonitorFuture = true,
+                EbookMonitorExisting = 1,
+                EbookMonitorFuture = false
+            };
+
+            var model = resource.ToModel();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(model.AudiobookMonitored, Is.True);
+                Assert.That(model.AudiobookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.New));
+                Assert.That(resource.AudiobookMonitorExistingMode, Is.EqualTo(MonitorTypes.None));
+                Assert.That(model.EbookMonitored, Is.True);
+                Assert.That(model.EbookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.All));
+                Assert.That(resource.EbookMonitorExistingMode, Is.EqualTo(MonitorTypes.All));
+            });
+        }
+
+        [Test]
+        public void should_project_binary_monitoring_for_deprecated_per_media_clients()
+        {
+            var resource = new NzbDrone.Core.Books.Author
+            {
+                AudiobookMonitored = true,
+                AudiobookMonitorNewItems = NewItemMonitorTypes.New,
+                EbookMonitored = false,
+                EbookMonitorNewItems = NewItemMonitorTypes.None
+            }.ToResource();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(resource.AudiobookMonitorExisting, Is.EqualTo(2));
+                Assert.That(resource.AudiobookMonitorFuture, Is.True);
+                Assert.That(resource.EbookMonitorExisting, Is.EqualTo(0));
+                Assert.That(resource.EbookMonitorFuture, Is.False);
+            });
+        }
+
+        [Test]
+        public void should_not_wipe_binary_monitoring_fields_when_not_provided_on_put_update()
         {
             var existing = new NzbDrone.Core.Books.Author
             {
@@ -70,10 +232,10 @@ namespace Chaptarr.Core.Test.Books
                 EbookRootFolderPath = "/ebooks",
                 AudiobookQualityProfileId = 2,
                 EbookQualityProfileId = 3,
-                AudiobookMonitorExisting = 2,
-                AudiobookMonitorFuture = true,
-                EbookMonitorExisting = 1,
-                EbookMonitorFuture = true,
+                AudiobookMonitored = true,
+                AudiobookMonitorNewItems = NewItemMonitorTypes.New,
+                EbookMonitored = true,
+                EbookMonitorNewItems = NewItemMonitorTypes.New,
                 AudiobookSettingsManuallyOverridden = false,
                 EbookSettingsManuallyOverridden = false
             };
@@ -91,10 +253,10 @@ namespace Chaptarr.Core.Test.Books
 
             var updated = resource.ToModel(existing);
 
-            Assert.That(updated.AudiobookMonitorExisting, Is.EqualTo(2));
-            Assert.That(updated.AudiobookMonitorFuture, Is.True);
-            Assert.That(updated.EbookMonitorExisting, Is.EqualTo(1));
-            Assert.That(updated.EbookMonitorFuture, Is.True);
+            Assert.That(updated.AudiobookMonitored, Is.True);
+            Assert.That(updated.AudiobookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.New));
+            Assert.That(updated.EbookMonitored, Is.True);
+            Assert.That(updated.EbookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.New));
             Assert.That(updated.AudiobookSettingsManuallyOverridden, Is.False);
             Assert.That(updated.EbookSettingsManuallyOverridden, Is.False);
         }
@@ -158,8 +320,11 @@ namespace Chaptarr.Core.Test.Books
 	            {
 	                ForeignAuthorId = "12345",
                 QualityProfileId = 7,
+                MetadataProfileId = 8,
                 RootFolderPath = "/books",
+                Monitored = true,
                 MonitorNewItems = "none",
+                Tags = new HashSet<int> { 4 },
                 AddOptions = new AddAuthorOptions
                 {
                     BooksToMonitor = new List<string> { "hc:999" }
@@ -173,8 +338,16 @@ namespace Chaptarr.Core.Test.Books
 	            Assert.That(model.AudnexusAuthorId, Is.Null);
 	            Assert.That(model.AudiobookQualityProfileId, Is.EqualTo(7));
 	            Assert.That(model.EbookQualityProfileId, Is.EqualTo(7));
+            Assert.That(model.AudiobookMetadataProfileId, Is.EqualTo(8));
+            Assert.That(model.EbookMetadataProfileId, Is.EqualTo(8));
             Assert.That(model.AudiobookRootFolderPath, Is.EqualTo("/books"));
             Assert.That(model.EbookRootFolderPath, Is.EqualTo("/books"));
+            Assert.That(model.AudiobookMonitored, Is.True);
+            Assert.That(model.EbookMonitored, Is.True);
+            Assert.That(model.AudiobookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.None));
+            Assert.That(model.EbookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.None));
+            Assert.That(model.AudiobookTags, Is.EquivalentTo(new[] { 4 }));
+            Assert.That(model.EbookTags, Is.EquivalentTo(new[] { 4 }));
 	            Assert.That(model.AddOptions.Monitor, Is.EqualTo(MonitorTypes.SpecificBook));
 	        }
 
@@ -263,8 +436,10 @@ namespace Chaptarr.Core.Test.Books
             {
                 ForeignAuthorId = "173491",
                 QualityProfileId = 7,
+                MetadataProfileId = 8,
                 RootFolderPath = "/ebooks",
                 Monitored = true,
+                MonitorNewItems = "all",
                 Tags = new HashSet<int> { 4, 5 }
             };
 
@@ -272,15 +447,102 @@ namespace Chaptarr.Core.Test.Books
 
             Assert.That(model.GoodreadsAuthorId, Is.EqualTo("gr:173491"));
             Assert.That(model.EbookQualityProfileId, Is.EqualTo(7));
+            Assert.That(model.EbookMetadataProfileId, Is.EqualTo(8));
             Assert.That(model.EbookRootFolderPath, Is.EqualTo("/ebooks"));
             Assert.That(model.EbookTags, Is.EquivalentTo(new[] { 4, 5 }));
-            Assert.That(model.EbookMonitorExisting, Is.EqualTo(1));
-            Assert.That(model.EbookMonitorFuture, Is.True);
+            Assert.That(model.EbookMonitored, Is.True);
+            Assert.That(model.EbookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.All));
             Assert.That(model.AudiobookQualityProfileId, Is.Null);
+            Assert.That(model.AudiobookMetadataProfileId, Is.Null);
             Assert.That(model.AudiobookRootFolderPath, Is.Null);
             Assert.That(model.AudiobookTags, Is.Null);
-            Assert.That(model.AudiobookMonitorExisting, Is.Null);
-            Assert.That(model.AudiobookMonitorFuture, Is.Null);
+            Assert.That(model.AudiobookMonitored, Is.Null);
+            Assert.That(model.AudiobookMonitorNewItems, Is.Null);
+        }
+
+        [Test]
+        public void should_translate_legacy_import_monitoring_into_the_binary_model()
+        {
+            var selected = AuthorController.ResolveImportMonitoring(new AuthorImportResource
+            {
+                MonitorExisting = "select",
+                MonitorFuture = false
+            }, BookMediaType.Audiobook);
+            var selectedFuture = AuthorController.ResolveImportMonitoring(new AuthorImportResource
+            {
+                MonitorExisting = "select",
+                MonitorFuture = true
+            }, BookMediaType.Audiobook);
+            var all = AuthorController.ResolveImportMonitoring(new AuthorImportResource
+            {
+                MonitorExisting = "all",
+                MonitorFuture = false
+            }, BookMediaType.Ebook);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(selected.Monitored, Is.True);
+                Assert.That(selected.MonitorExistingMode, Is.EqualTo(MonitorTypes.None));
+                Assert.That(selected.MonitorNewItems, Is.EqualTo(NewItemMonitorTypes.None));
+                Assert.That(selectedFuture.Monitored, Is.True);
+                Assert.That(selectedFuture.MonitorExistingMode, Is.EqualTo(MonitorTypes.None));
+                Assert.That(selectedFuture.MonitorNewItems, Is.EqualTo(NewItemMonitorTypes.New));
+                Assert.That(all.Monitored, Is.True);
+                Assert.That(all.MonitorExistingMode, Is.EqualTo(MonitorTypes.All));
+                Assert.That(all.MonitorNewItems, Is.EqualTo(NewItemMonitorTypes.All));
+            });
+        }
+
+        [Test]
+        public void legacy_select_should_target_the_requested_book_on_the_book_import_contract()
+        {
+            var monitoring = AuthorController.ResolveImportMonitoring(new AuthorImportResource
+            {
+                MonitorExisting = "select",
+                MonitorFuture = false
+            }, BookMediaType.Ebook, legacySelectTargetsSpecificBook: true);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(monitoring.Monitored, Is.True);
+                Assert.That(monitoring.MonitorExistingMode, Is.EqualTo(MonitorTypes.SpecificBook));
+                Assert.That(monitoring.MonitorNewItems, Is.EqualTo(NewItemMonitorTypes.None));
+            });
+        }
+
+        [Test]
+        public void explicit_import_monitoring_should_override_legacy_fields()
+        {
+            var monitoring = AuthorController.ResolveImportMonitoring(new AuthorImportResource
+            {
+                Monitor = "all",
+                MonitorExisting = "all",
+                MonitorFuture = true,
+                EbookMonitored = false,
+                EbookMonitorExistingMode = MonitorTypes.None,
+                EbookMonitorNewItems = NewItemMonitorTypes.None
+            }, BookMediaType.Ebook);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(monitoring.Monitored, Is.False);
+                Assert.That(monitoring.MonitorExistingMode, Is.EqualTo(MonitorTypes.None));
+                Assert.That(monitoring.MonitorNewItems, Is.EqualTo(NewItemMonitorTypes.None));
+            });
+        }
+
+        [Test]
+        public void initial_book_monitoring_should_not_rewrite_an_existing_media_catalog()
+        {
+            Assert.Multiple(() =>
+            {
+                Assert.That(AuthorController.ShouldApplyInitialBookMonitoring(false, MonitorTypes.All), Is.True);
+                Assert.That(AuthorController.ShouldApplyInitialBookMonitoring(false, MonitorTypes.None), Is.True);
+                Assert.That(AuthorController.ShouldApplyInitialBookMonitoring(true, MonitorTypes.All), Is.False);
+                Assert.That(AuthorController.ShouldApplyInitialBookMonitoring(true, MonitorTypes.Missing), Is.False);
+                Assert.That(AuthorController.ShouldApplyInitialBookMonitoring(true, MonitorTypes.SpecificBook), Is.True);
+                Assert.That(AuthorController.ShouldApplyInitialBookMonitoring(false, null), Is.False);
+            });
         }
 
         [Test]
@@ -300,10 +562,10 @@ namespace Chaptarr.Core.Test.Books
                 AudiobookTags = new HashSet<int> { 10 },
                 EbookTags = new HashSet<int> { 20 },
                 Tags = new HashSet<int> { 10, 20 },
-                AudiobookMonitorExisting = 2,
-                AudiobookMonitorFuture = true,
-                EbookMonitorExisting = 1,
-                EbookMonitorFuture = true,
+                AudiobookMonitored = true,
+                AudiobookMonitorNewItems = NewItemMonitorTypes.New,
+                EbookMonitored = true,
+                EbookMonitorNewItems = NewItemMonitorTypes.New,
                 LastSelectedMediaType = "ebook"
             };
 
@@ -312,20 +574,25 @@ namespace Chaptarr.Core.Test.Books
                 Id = 1,
                 AuthorName = "E. Lockhart",
                 QualityProfileId = 7,
-                Monitored = true
+                Monitored = false,
+                MonitorNewItems = "none",
+                AudiobookMonitored = true,
+                AudiobookMonitorNewItems = NewItemMonitorTypes.All
             };
 
             var updated = resource.ToModel(existing, new ReadarrFacadeContext("gr", "audiobook", "/readarr/gr/audiobook"));
 
             Assert.That(updated.AudiobookQualityProfileId, Is.EqualTo(7));
+            Assert.That(updated.AudiobookMonitored, Is.False);
+            Assert.That(updated.AudiobookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.None));
             Assert.That(updated.AudiobookRootFolderPath, Is.EqualTo("/audiobooks"));
             Assert.That(updated.AudiobookTags, Is.EquivalentTo(new[] { 10 }));
             Assert.That(updated.EbookQualityProfileId, Is.EqualTo(3));
             Assert.That(updated.EbookMetadataProfileId, Is.EqualTo(5));
             Assert.That(updated.EbookRootFolderPath, Is.EqualTo("/ebooks"));
             Assert.That(updated.EbookTags, Is.EquivalentTo(new[] { 20 }));
-            Assert.That(updated.EbookMonitorExisting, Is.EqualTo(1));
-            Assert.That(updated.EbookMonitorFuture, Is.True);
+            Assert.That(updated.EbookMonitored, Is.True);
+            Assert.That(updated.EbookMonitorNewItems, Is.EqualTo(NewItemMonitorTypes.New));
             Assert.That(updated.Path, Is.EqualTo("/authors/E Lockhart"));
             Assert.That(updated.LastSelectedMediaType, Is.EqualTo("ebook"));
             Assert.That(updated.Tags, Is.EquivalentTo(new[] { 10, 20 }));
