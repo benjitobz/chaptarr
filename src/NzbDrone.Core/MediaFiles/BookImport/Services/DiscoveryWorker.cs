@@ -735,6 +735,14 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                         discoveredFolder,
                         "discovery-local-backfill");
 
+                    if (!config.CreateAudiobook && !config.CreateEbook)
+                    {
+                        _logger.Warn(
+                            "[DISCOVERY] Root folder '{0}' has no complete defaults for the discovered media type; leaving files unmapped",
+                            rootFolder?.Path);
+                        return false;
+                    }
+
                     var hydrated = await _authorLibraryService.AddAuthorAsync(providerId, config).ConfigureAwait(false);
                     if (hydrated == null || hydrated.Id <= 0)
                     {
@@ -1350,6 +1358,14 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                     discoveredEbookFiles,
                     discoveredAuthorFolderToPreserve,
                     "discovery-worker");
+                if (!cfg.CreateAudiobook && !cfg.CreateEbook)
+                {
+                    _logger.Warn(
+                        "[DISCOVERY] Root folder '{0}' has no complete defaults for the discovered media type; leaving files unmapped",
+                        rootFolder?.Path);
+                    return false;
+                }
+
                 // If author already exists locally by provider ID, augment settings and publish ready event
                 try
                 {
@@ -1357,18 +1373,24 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                     var existing = _authorService.FindByProviderId(prefix, rawId);
                     if (existing != null)
                     {
-                        // Apply progressive settings for the detected media types
-                        var updated = _authorService.UpdateAuthorProgressiveSettings(
-                            existing,
-                            cfg.CreateAudiobook ? cfg.AudiobookQualityProfileId : null,
-                            cfg.CreateAudiobook ? cfg.AudiobookMetadataProfileId : null,
-                            cfg.CreateAudiobook ? cfg.AudiobookMonitorExisting : null,
-                            cfg.CreateAudiobook ? cfg.AudiobookMonitorFuture : null,
-                            cfg.CreateEbook ? cfg.EbookQualityProfileId : null,
-                            cfg.CreateEbook ? cfg.EbookMetadataProfileId : null,
-                            cfg.CreateEbook ? cfg.EbookMonitorExisting : null,
-                            cfg.CreateEbook ? cfg.EbookMonitorFuture : null,
-                            rootFolder.Path);
+                        // Add only missing author-side settings. Current-book seeding is
+                        // carried by the root setting; it is not an author policy.
+                        var updated = existing;
+                        var settingsChanged = false;
+                        if (cfg.CreateAudiobook)
+                        {
+                            settingsChanged |= ApplyMediaSettings(updated, BookMediaType.Audiobook, cfg, rootFolder.Path);
+                        }
+
+                        if (cfg.CreateEbook)
+                        {
+                            settingsChanged |= ApplyMediaSettings(updated, BookMediaType.Ebook, cfg, rootFolder.Path);
+                        }
+
+                        if (settingsChanged)
+                        {
+                            updated = _authorService.UpdateAuthor(updated);
+                        }
 
                         // Ensure author folder path is set for the relevant media type(s).
                         // When a canonical/generated path is stale (doesn't exist on disk), prefer the discovered on-disk folder
@@ -1739,8 +1761,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                 CreateAudiobook = createAudiobook,
                 CreateEbook = createEbook,
                 RequestedBy = requestedBy,
-                MonitorExisting = true,
-                MonitorFuture = true,
                 DiscoveredAuthorFolderPath = discoveredAuthorFolder
             };
 
@@ -1749,50 +1769,138 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                 return config;
             }
 
-            if (config.CreateAudiobook)
+            var requestedAudiobook = config.CreateAudiobook;
+            var requestedEbook = config.CreateEbook;
+            config.CreateAudiobook = false;
+            config.CreateEbook = false;
+
+            if (requestedAudiobook)
             {
-                config.AudiobookRootFolderPath = rootFolder.Path;
                 var settings = rootFolder.GetAudiobookSettings();
-                if (settings != null)
+                if (RootFolderSettingsResolver.HasRequiredProfiles(settings))
                 {
+                    config.CreateAudiobook = true;
+                    config.AudiobookRootFolderPath = rootFolder.Path;
                     config.AudiobookQualityProfileId = settings.QualityProfileId;
                     config.AudiobookMetadataProfileId = settings.MetadataProfileId;
-                    config.AudiobookMonitorExisting = settings.MonitorExisting;
-                    config.AudiobookMonitorFuture = settings.MonitorFuture;
-                    AddTags(config, settings.Tags);
+                    config.AudiobookMonitorExistingMode = RootFolderSettingsResolver.ResolveInitialMonitorMode(settings.MonitorExistingMode);
+                    config.AudiobookMonitored = settings.Monitored;
+                    config.AudiobookMonitorNewItems = settings.MonitorNewItems;
+                    config.MergeTagsForMediaType(BookMediaType.Audiobook, settings.Tags);
                 }
             }
 
-            if (config.CreateEbook)
+            if (requestedEbook)
             {
-                config.EbookRootFolderPath = rootFolder.Path;
                 var settings = rootFolder.GetEbookSettings();
-                if (settings != null)
+                if (RootFolderSettingsResolver.HasRequiredProfiles(settings))
                 {
+                    config.CreateEbook = true;
+                    config.EbookRootFolderPath = rootFolder.Path;
                     config.EbookQualityProfileId = settings.QualityProfileId;
                     config.EbookMetadataProfileId = settings.MetadataProfileId;
-                    config.EbookMonitorExisting = settings.MonitorExisting;
-                    config.EbookMonitorFuture = settings.MonitorFuture;
-                    AddTags(config, settings.Tags);
+                    config.EbookMonitorExistingMode = RootFolderSettingsResolver.ResolveInitialMonitorMode(settings.MonitorExistingMode);
+                    config.EbookMonitored = settings.Monitored;
+                    config.EbookMonitorNewItems = settings.MonitorNewItems;
+                    config.MergeTagsForMediaType(BookMediaType.Ebook, settings.Tags);
                 }
             }
 
             return config;
         }
 
-        private static void AddTags(MonitoringConfig config, IEnumerable<int> tags)
+        private static bool ApplyMediaSettings(Author author, BookMediaType mediaType, MonitoringConfig config, string rootFolderPath)
         {
-            var values = tags?.ToList();
-            if (config == null || values == null || values.Count == 0)
+            if (author == null || config == null)
             {
-                return;
+                return false;
             }
 
-            config.Tags ??= new HashSet<int>();
-            foreach (var tag in values)
+            var changed = false;
+            if (mediaType == BookMediaType.Audiobook)
             {
-                config.Tags.Add(tag);
+                if (!author.AudiobookQualityProfileId.HasValue && config.AudiobookQualityProfileId.HasValue)
+                {
+                    author.AudiobookQualityProfileId = config.AudiobookQualityProfileId;
+                    changed = true;
+                }
+
+                if (!author.AudiobookMetadataProfileId.HasValue && config.AudiobookMetadataProfileId.HasValue)
+                {
+                    author.AudiobookMetadataProfileId = config.AudiobookMetadataProfileId;
+                    changed = true;
+                }
+
+                if (!author.AudiobookMonitored.HasValue && config.AudiobookMonitored.HasValue)
+                {
+                    author.AudiobookMonitored = config.AudiobookMonitored;
+                    changed = true;
+                }
+
+                if (!author.AudiobookMonitorNewItems.HasValue && config.AudiobookMonitorNewItems.HasValue)
+                {
+                    author.AudiobookMonitorNewItems = config.AudiobookMonitorNewItems;
+                    changed = true;
+                }
+
+                if (string.IsNullOrWhiteSpace(author.AudiobookRootFolderPath) && !string.IsNullOrWhiteSpace(rootFolderPath))
+                {
+                    author.AudiobookRootFolderPath = rootFolderPath;
+                    changed = true;
+                }
+
+                if (author.AudiobookTags == null && config.AudiobookTags != null)
+                {
+                    author.AudiobookTags = new HashSet<int>(config.AudiobookTags);
+                    author.Tags = (author.AudiobookTags ?? new HashSet<int>())
+                        .Concat(author.EbookTags ?? new HashSet<int>())
+                        .ToHashSet();
+                    changed = true;
+                }
             }
+            else
+            {
+                if (!author.EbookQualityProfileId.HasValue && config.EbookQualityProfileId.HasValue)
+                {
+                    author.EbookQualityProfileId = config.EbookQualityProfileId;
+                    changed = true;
+                }
+
+                if (!author.EbookMetadataProfileId.HasValue && config.EbookMetadataProfileId.HasValue)
+                {
+                    author.EbookMetadataProfileId = config.EbookMetadataProfileId;
+                    changed = true;
+                }
+
+                if (!author.EbookMonitored.HasValue && config.EbookMonitored.HasValue)
+                {
+                    author.EbookMonitored = config.EbookMonitored;
+                    changed = true;
+                }
+
+                if (!author.EbookMonitorNewItems.HasValue && config.EbookMonitorNewItems.HasValue)
+                {
+                    author.EbookMonitorNewItems = config.EbookMonitorNewItems;
+                    changed = true;
+                }
+
+                if (string.IsNullOrWhiteSpace(author.EbookRootFolderPath) && !string.IsNullOrWhiteSpace(rootFolderPath))
+                {
+                    author.EbookRootFolderPath = rootFolderPath;
+                    changed = true;
+                }
+
+                if (author.EbookTags == null && config.EbookTags != null)
+                {
+                    author.EbookTags = new HashSet<int>(config.EbookTags);
+                    author.Tags = (author.AudiobookTags ?? new HashSet<int>())
+                        .Concat(author.EbookTags ?? new HashSet<int>())
+                        .ToHashSet();
+                    changed = true;
+                }
+            }
+
+            return changed;
         }
 
         private static Dictionary<string, List<string>> CloneTags(Dictionary<string, List<string>> tags)

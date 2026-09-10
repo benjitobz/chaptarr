@@ -78,8 +78,6 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
             config = new MonitoringConfig
             {
                 AuthorName = request.AuthorName,
-                MonitorExisting = true,
-                MonitorFuture = true,
                 CreateAudiobook = wantsAudiobook,
                 CreateEbook = wantsEbook,
                 QueueIfUnavailable = request.QueueIfUnavailable,
@@ -101,6 +99,13 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                 !TryApplyRootSettings(request, rootFolderService, configService, filePaths, FolderType.Ebook, config, out ebookRoot, out error))
             {
                 config = null;
+                return false;
+            }
+
+            if (!config.CreateAudiobook && !config.CreateEbook)
+            {
+                config = null;
+                error = "No selected root folder has complete quality and metadata profile defaults for the detected media types";
                 return false;
             }
 
@@ -159,48 +164,62 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
 
             if (mediaType == FolderType.Audiobook)
             {
-                config.AudiobookRootFolderPath = rootFolder.Path;
-
                 var settings = rootFolder.GetAudiobookSettings();
-                if (settings == null)
+                if (!RootFolderSettingsResolver.HasRequiredProfiles(settings))
                 {
                     if (request.AllowMissingMediaSettings)
                     {
+                        config.CreateAudiobook = false;
+                        rootFolder = null;
                         return true;
                     }
 
-                    error = $"Root folder '{rootFolder.Path}' is missing audiobook settings";
+                    error = $"Root folder '{rootFolder.Path}' is missing complete audiobook quality and metadata profile defaults";
                     return false;
                 }
 
+                config.AudiobookRootFolderPath = rootFolder.Path;
                 config.AudiobookQualityProfileId = settings.QualityProfileId;
                 config.AudiobookMetadataProfileId = settings.MetadataProfileId;
-                config.AudiobookMonitorExisting = settings.MonitorExisting;
-                config.AudiobookMonitorFuture = settings.MonitorFuture;
-                AddTags(config, rootFolder, settings.Tags, request.IncludeRootDefaultTags);
+                config.AudiobookMonitorExistingMode = RootFolderSettingsResolver.ResolveInitialMonitorMode(settings.MonitorExistingMode);
+                config.AudiobookMonitored = settings.Monitored;
+                config.AudiobookMonitorNewItems = settings.MonitorNewItems;
+                if (request.IncludeRootDefaultTags)
+                {
+                    config.MergeTagsForMediaType(BookMediaType.Audiobook, rootFolder.DefaultTags);
+                }
+
+                config.MergeTagsForMediaType(BookMediaType.Audiobook, settings.Tags);
 
                 return true;
             }
 
-            config.EbookRootFolderPath = rootFolder.Path;
-
             var ebookSettings = rootFolder.GetEbookSettings();
-            if (ebookSettings == null)
+            if (!RootFolderSettingsResolver.HasRequiredProfiles(ebookSettings))
             {
                 if (request.AllowMissingMediaSettings)
                 {
+                    config.CreateEbook = false;
+                    rootFolder = null;
                     return true;
                 }
 
-                error = $"Root folder '{rootFolder.Path}' is missing ebook settings";
+                error = $"Root folder '{rootFolder.Path}' is missing complete ebook quality and metadata profile defaults";
                 return false;
             }
 
+            config.EbookRootFolderPath = rootFolder.Path;
             config.EbookQualityProfileId = ebookSettings.QualityProfileId;
             config.EbookMetadataProfileId = ebookSettings.MetadataProfileId;
-            config.EbookMonitorExisting = ebookSettings.MonitorExisting;
-            config.EbookMonitorFuture = ebookSettings.MonitorFuture;
-            AddTags(config, rootFolder, ebookSettings.Tags, request.IncludeRootDefaultTags);
+            config.EbookMonitorExistingMode = RootFolderSettingsResolver.ResolveInitialMonitorMode(ebookSettings.MonitorExistingMode);
+            config.EbookMonitored = ebookSettings.Monitored;
+            config.EbookMonitorNewItems = ebookSettings.MonitorNewItems;
+            if (request.IncludeRootDefaultTags)
+            {
+                config.MergeTagsForMediaType(BookMediaType.Ebook, rootFolder.DefaultTags);
+            }
+
+            config.MergeTagsForMediaType(BookMediaType.Ebook, ebookSettings.Tags);
 
             return true;
         }
@@ -312,31 +331,5 @@ namespace NzbDrone.Core.MediaFiles.BookImport.Services
                    MediaFileExtensions.TextExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
         }
 
-        private static void AddTags(MonitoringConfig config, RootFolder rootFolder, IEnumerable<int> settingTags, bool includeRootDefaultTags)
-        {
-            void AddTag(int tag)
-            {
-                config.Tags ??= new HashSet<int>();
-                config.Tags.Add(tag);
-            }
-
-            if (includeRootDefaultTags && rootFolder.DefaultTags != null)
-            {
-                foreach (var tag in rootFolder.DefaultTags)
-                {
-                    AddTag(tag);
-                }
-            }
-
-            if (settingTags == null)
-            {
-                return;
-            }
-
-            foreach (var tag in settingTags)
-            {
-                AddTag(tag);
-            }
-        }
     }
 }

@@ -47,17 +47,20 @@ namespace NzbDrone.Core.RootFolders
                 mediaSettings = rootFolder.GetEbookSettings();
             }
 
-            // If we have media-specific settings, use them
+            // A settings blob is not usable unless both profiles needed to create
+            // an author media side are present. Keep returning the partial values
+            // for diagnostics, but never advertise them as configured.
             if (mediaSettings != null)
             {
                 return new ResolvedRootFolderSettings
                 {
                     QualityProfileId = mediaSettings.QualityProfileId,
                     MetadataProfileId = mediaSettings.MetadataProfileId,
-                    MonitorExisting = mediaSettings.MonitorExisting,
-                    MonitorFuture = mediaSettings.MonitorFuture,
+                    Monitored = mediaSettings.Monitored,
+                    MonitorExistingMode = mediaSettings.MonitorExistingMode,
+                    MonitorNewItems = mediaSettings.MonitorNewItems,
                     Tags = mediaSettings.Tags ?? new System.Collections.Generic.List<int>(),
-                    IsConfigured = true,
+                    IsConfigured = HasRequiredProfiles(mediaSettings),
                     Source = "MediaSpecific"
                 };
             }
@@ -69,6 +72,17 @@ namespace NzbDrone.Core.RootFolders
                 IsConfigured = false,
                 Source = "Unconfigured"
             };
+        }
+
+        public static bool HasRequiredProfiles(MediaTypeSettings settings)
+        {
+            return (settings?.QualityProfileId ?? 0) > 0 &&
+                   (settings?.MetadataProfileId ?? 0) > 0;
+        }
+
+        public static MonitorTypes? ResolveInitialMonitorMode(MonitorTypes? monitorExistingMode)
+        {
+            return monitorExistingMode;
         }
     }
 }

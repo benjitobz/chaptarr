@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Chaptarr.Api.V1.Author;
 using Chaptarr.Api.V1.MediaTypes;
 using Chaptarr.Api.V1.ProviderIds;
 using Chaptarr.Http;
@@ -12,6 +13,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using NLog;
 using NzbDrone.Common.Extensions;
+using NzbDrone.Common.TPL;
 using NzbDrone.Core.AuthorStats;
 using NzbDrone.Core.Books;
 using NzbDrone.Core.Books.Commands;
@@ -64,6 +66,9 @@ namespace Chaptarr.Api.V1.Books
 	        private readonly Logger _logger;
 	        private readonly object _importStateLock = new object();
 	        private readonly HashSet<int> _activeImportCommands = new HashSet<int>();
+            private readonly object _bookEditBroadcastLock = new object();
+            private readonly HashSet<int> _pendingBookEditIds = new HashSet<int>();
+            private readonly Debouncer _bookEditBroadcastDebouncer;
 
 	        public BookController(IAuthorService authorService,
 	                          IBookService bookService,
@@ -100,6 +105,7 @@ namespace Chaptarr.Api.V1.Books
             _eventAggregator = eventAggregator;
             _logger = logger;
             _providerAliasService = providerAliasService;
+            _bookEditBroadcastDebouncer = new Debouncer(FlushPendingBookEdits, TimeSpan.FromMilliseconds(500), executeRestartsTimer: true);
 
             PostValidator.RuleFor(s => s.Author).Must(author =>
             {
@@ -165,15 +171,7 @@ namespace Chaptarr.Api.V1.Books
 	            PostValidator.RuleFor(s => s.Author.EbookMetadataProfileId)
 	                         .SetValidator(metadataProfileExistsValidator)
 	                         .When(s => s.Author?.EbookMetadataProfileId.HasValue == true && s.Author.EbookMetadataProfileId.Value > 0);
-	            PostValidator.RuleFor(s => s.Author.AudiobookMonitorExisting)
-	                         .Must(v => !v.HasValue || v.Value is 0 or 1 or 2)
-	                         .When(s => s.Author != null)
-	                         .WithMessage("AudiobookMonitorExisting must be 0 (None), 1 (All), or 2 (Selected)");
-	            PostValidator.RuleFor(s => s.Author.EbookMonitorExisting)
-	                         .Must(v => !v.HasValue || v.Value is 0 or 1 or 2)
-	                         .When(s => s.Author != null)
-	                         .WithMessage("EbookMonitorExisting must be 0 (None), 1 (All), or 2 (Selected)");
-	            PostValidator.RuleFor(s => s.Author.AudiobookRootFolderPath).IsValidPath()
+            PostValidator.RuleFor(s => s.Author.AudiobookRootFolderPath).IsValidPath()
 		                         .When(s => s.Author.Path.IsNullOrWhiteSpace() && !s.Author.AudiobookRootFolderPath.IsNullOrWhiteSpace());
             PostValidator.RuleFor(s => s.Author.EbookRootFolderPath).IsValidPath()
 	                         .When(s => s.Author.Path.IsNullOrWhiteSpace() && !s.Author.EbookRootFolderPath.IsNullOrWhiteSpace());
@@ -239,6 +237,53 @@ namespace Chaptarr.Api.V1.Books
 	                return _activeImportCommands.Count > 0;
 	            }
 	        }
+
+        private void QueueBookEditBroadcast(int bookId)
+        {
+            if (bookId <= 0)
+            {
+                return;
+            }
+
+            var firstInBurst = false;
+            lock (_bookEditBroadcastLock)
+            {
+                firstInBurst = _pendingBookEditIds.Count == 0;
+                _pendingBookEditIds.Add(bookId);
+            }
+
+            // Preserve an immediate row update for ordinary single-book edits. If more
+            // edits arrive in the same burst, the debounced flush replaces hundreds of
+            // fully-loaded row broadcasts with one collection sync.
+            if (firstInBurst)
+            {
+                BroadcastResourceChange(ModelAction.Updated, bookId);
+            }
+
+            _bookEditBroadcastDebouncer.Execute();
+        }
+
+        internal void FlushPendingBookEdits()
+        {
+            try
+            {
+                int pendingCount;
+                lock (_bookEditBroadcastLock)
+                {
+                    pendingCount = _pendingBookEditIds.Count;
+                    _pendingBookEditIds.Clear();
+                }
+
+                if (pendingCount > 1)
+                {
+                    BroadcastResourceChange(ModelAction.Sync);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "[UI-BROADCAST] Failed to flush pending Book updates");
+            }
+        }
 
 	        [HttpPost("import")]
 	        [ProducesResponseType(typeof(ProviderAmbiguityResource), ProviderAmbiguityHelper.StatusCode)]
@@ -362,21 +407,23 @@ namespace Chaptarr.Api.V1.Books
                     }
                 }
 
-                MonitorTypes monitorMode;
-                var monitorExisting = importResource.AuthorMonitoring?.MonitorExisting ?? "None";
-                switch (monitorExisting.ToLowerInvariant())
+                var authorMonitoring = importResource.AuthorMonitoring;
+                var monitoring = AuthorController.ResolveImportMonitoring(new AuthorImportResource
                 {
-                    case "all":
-                        monitorMode = MonitorTypes.All;
-                        break;
-                    case "select":
-                        monitorMode = MonitorTypes.SpecificBook;
-                        break;
-                    case "none":
-                    default:
-                        monitorMode = MonitorTypes.None;
-                        break;
-                }
+                    Monitor = authorMonitoring?.Monitor,
+                    MonitorExisting = authorMonitoring?.MonitorExisting,
+                    MonitorFuture = authorMonitoring?.MonitorFuture,
+                    AudiobookMonitored = authorMonitoring?.AudiobookMonitored,
+                    AudiobookMonitorNewItems = authorMonitoring?.AudiobookMonitorNewItems,
+                    AudiobookMonitorExistingMode = authorMonitoring?.AudiobookMonitorExistingMode,
+                    EbookMonitored = authorMonitoring?.EbookMonitored,
+                    EbookMonitorNewItems = authorMonitoring?.EbookMonitorNewItems,
+                    EbookMonitorExistingMode = authorMonitoring?.EbookMonitorExistingMode
+                }, bookMediaType, legacySelectTargetsSpecificBook: true);
+                var monitorMode = monitoring.MonitorExistingMode ?? MonitorTypes.SpecificBook;
+                var authorMonitored = monitoring.Monitored;
+                var monitorNewItems = monitoring.MonitorNewItems;
+                var monitorCurrentBook = monitorMode != MonitorTypes.None;
 
                 if (editionId != "0" && !string.Equals(editionProvider, bookProvider, StringComparison.OrdinalIgnoreCase))
                 {
@@ -391,7 +438,9 @@ namespace Chaptarr.Api.V1.Books
                 {
                     Title = "Pending Import",
                     MediaType = bookMediaType,
-                    Monitored = true,
+                    Monitored = monitorCurrentBook,
+                    AudiobookMonitored = bookMediaType == BookMediaType.Audiobook && monitorCurrentBook,
+                    EbookMonitored = bookMediaType == BookMediaType.Ebook && monitorCurrentBook,
                     // This compatibility/import endpoint is automation-facing. A supplied Edition is an
                     // initial preference, not the explicit human preservation pin used by the id-route editor.
                     AnyEditionOk = true,
@@ -439,12 +488,16 @@ namespace Chaptarr.Api.V1.Books
                 var author = new NzbDrone.Core.Books.Author
                 {
                     Name = "Pending Import",
-                    Monitored = monitorMode == MonitorTypes.All || importResource.AuthorMonitoring?.MonitorFuture == true,
+                    Monitored = authorMonitored == true,
+                    AudiobookMonitored = bookMediaType == BookMediaType.Audiobook ? authorMonitored : null,
+                    AudiobookMonitorNewItems = bookMediaType == BookMediaType.Audiobook ? monitorNewItems : null,
+                    EbookMonitored = bookMediaType == BookMediaType.Ebook ? authorMonitored : null,
+                    EbookMonitorNewItems = bookMediaType == BookMediaType.Ebook ? monitorNewItems : null,
                     AddOptions = new AddAuthorOptions
                     {
                         Monitor = monitorMode,
-                        Monitored = monitorMode == MonitorTypes.All || importResource.AuthorMonitoring?.MonitorFuture == true,
-                        SearchForMissingBooks = importResource.AuthorMonitoring?.SearchForMissing == true
+                        Monitored = authorMonitored == true,
+                        SearchForMissingBooks = authorMonitoring?.SearchForMissing == true
                     }
                 };
 
@@ -472,18 +525,12 @@ namespace Chaptarr.Api.V1.Books
                     author.AudiobookRootFolderPath = importResource.RootFolder;
                     author.AudiobookQualityProfileId = importResource.QualityProfileId;
                     author.AudiobookMetadataProfileId = importResource.MetadataProfileId;
-                    author.AudiobookMonitorExisting = monitorMode == MonitorTypes.All ? 1 :
-                                                      monitorMode == MonitorTypes.SpecificBook ? 2 : 0;
-                    author.AudiobookMonitorFuture = importResource.AuthorMonitoring?.MonitorFuture;
                 }
                 else
                 {
                     author.EbookRootFolderPath = importResource.RootFolder;
                     author.EbookQualityProfileId = importResource.QualityProfileId;
                     author.EbookMetadataProfileId = importResource.MetadataProfileId;
-                    author.EbookMonitorExisting = monitorMode == MonitorTypes.All ? 1 :
-                                                  monitorMode == MonitorTypes.SpecificBook ? 2 : 0;
-                    author.EbookMonitorFuture = importResource.AuthorMonitoring?.MonitorFuture;
                 }
 
                 bookToAdd.Author = author;
@@ -506,7 +553,7 @@ namespace Chaptarr.Api.V1.Books
                 var addedBook = await _addBookService.AddBook(bookToAdd);
                 EnsureBookCover(addedBook.Id, "import");
 
-                if (importResource.AuthorMonitoring?.SearchForMissing == true)
+                if (authorMonitoring?.SearchForMissing == true)
                 {
                     _commandQueueManager.Push(new BookSearchCommand
                     {
@@ -1190,8 +1237,8 @@ namespace Chaptarr.Api.V1.Books
 		                    _logger.Debug("[AddBook] GoodreadsBookId: {0}", bookResource?.GoodreadsBookId ?? "NULL");
 		                    _logger.Debug("[AddBook] Author.Id: {0}", bookResource?.Author?.Id ?? 0);
 		                    _logger.Debug("[AddBook] Author.AuthorName: {0}", bookResource?.Author?.AuthorName ?? "NULL");
-		                    _logger.Debug("[AddBook] Author.AudiobookMonitorExisting: {0}", bookResource?.Author?.AudiobookMonitorExisting ?? 0);
-		                    _logger.Debug("[AddBook] Author.EbookMonitorExisting: {0}", bookResource?.Author?.EbookMonitorExisting ?? 0);
+                    _logger.Debug("[AddBook] Author.AudiobookMonitored: {0}", bookResource?.Author?.AudiobookMonitored);
+                    _logger.Debug("[AddBook] Author.EbookMonitored: {0}", bookResource?.Author?.EbookMonitored);
 		                    _logger.Debug("[AddBook] Editions count: {0}", bookResource?.Editions?.Count ?? 0);
 		                }
 
@@ -1383,8 +1430,8 @@ namespace Chaptarr.Api.V1.Books
 		            }
 		        }
 
-		        private static bool IsMissingUpstreamProviderBookId(NzbDrone.Core.Books.Book book)
-		        {
+        private static bool IsMissingUpstreamProviderBookId(NzbDrone.Core.Books.Book book)
+        {
 	            if (book == null)
 	            {
 	                return true;
@@ -1393,7 +1440,7 @@ namespace Chaptarr.Api.V1.Books
 	            return string.IsNullOrWhiteSpace(book.HardcoverBookId) &&
 	                   string.IsNullOrWhiteSpace(book.GoodreadsWorkId) &&
 	                   string.IsNullOrWhiteSpace(book.OpenLibraryWorkId) &&
-	                   !BookEditionIdentity.GetCanonicalEditionProviderIds(book).Any();
+                   !BookEditionIdentity.GetCanonicalEditionProviderIds(book).Any();
 		        }
 
             private static List<ValidationFailure> GetNativePrefixFailures(BookResource bookResource, ReadarrFacadeContext facadeContext)
@@ -1840,7 +1887,7 @@ namespace Chaptarr.Api.V1.Books
             {
                 // A facade request changes only its media side. The generic update would overwrite
                 // the other side; submitted edition selection is persisted independently below.
-                _authorService.PromoteMediaTypeMonitoringToSelected(model.AuthorId, facadeContext.MediaType);
+                _authorService.EnsureMediaTypeMonitoring(model.AuthorId, facadeContext.MediaType);
                 _bookService.SetMonitoredForMediaType(new[] { model.Id }, facadeContext.MediaType, true);
             }
             else
@@ -2003,10 +2050,7 @@ namespace Chaptarr.Api.V1.Books
         [NonAction]
         public void Handle(BookEditedEvent message)
         {
-            // Always broadcast a fully loaded book resource (editions, files, covers).
-            // In Chaptarr, Books no longer use lazy loading for Editions, so the Book instance on the event
-            // may not contain Editions and can cause the displayed title/cover to "change" on monitor toggles.
-            BroadcastResourceChange(ModelAction.Updated, message.Book.Id);
+            QueueBookEditBroadcast(message.Book.Id);
         }
 
         [NonAction]
