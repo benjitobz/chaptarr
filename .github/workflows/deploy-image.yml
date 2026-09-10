@@ -1,11 +1,13 @@
-name: Personal Image
+name: Deploy Image
 
 # Builds the branch this fork deploys from and pushes it to GHCR. Separate from
 # build.yml and docker-publish.yml so nothing here can reach upstream's registry
 # or interfere with a release: those two only ever run for main and develop.
+#
+# The branch name becomes the image tag, so it must stay free of slashes.
 on:
   push:
-    branches: [ develop-personal ]
+    branches: [ deploy ]
   workflow_dispatch:
 
 # A newer push supersedes an in-flight build of the same branch.
