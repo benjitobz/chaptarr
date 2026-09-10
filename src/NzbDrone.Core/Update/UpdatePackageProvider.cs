@@ -240,18 +240,11 @@ namespace NzbDrone.Core.Update
                     Branch = "chaptarr",
                     Changes = new UpdateChanges
                     {
-                        New = new List<string>
-                        {
-                            "The Shelf page now has an audiobook/eBook toggle and changes book monitoring separately for each format."
-                        },
                         Fixed = new List<string>
                         {
-                            "Adding a book whose author isn't ready on the metadata server no longer fails with a confusing error like \"no edition survived pruning\". The request is saved (like with adding an author) and will remember if you wanted to search it or not when it arrives.",
-                            "Saving the Shelf with no monitoring change selected no longer monitors all existing books for the selected authors.",
-                            "Hardcover search works again after a Hardcover API change, and failures now show the actual reason.",
-                            "Grabbing a release that already exists in qBittorrent or Deluge is now clearly rejected instead of silently taking over the existing torrent.",
-                            "Removed the Shelf's non-working Monitor Author and Monitor New Books controls. Those settings remain in the Author Editor.",
-                            "Matching no longer breaks when file tags contain unusual embedded characters."
+                            "The Updates page no longer says you are on the latest version when a newer release exists. Thanks chunni!",
+                            "System Status now warns when a newer release is available.",
+                            "The book list on an author page keeps its column widths steady."
                         }
                     }
                 }
