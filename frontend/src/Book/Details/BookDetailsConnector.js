@@ -193,6 +193,7 @@ function createMapStateToProps() {
         isCommandExecuting(pushCommand) &&
         pushCommand.body &&
         (pushCommand.body.bookIds || []).includes(book.id)
+        );
         const rePushCommand = findCommand(commands, { name: commandNames.REPUSH_BOOK });
         const isRePushing = !!(
           rePushCommand &&
