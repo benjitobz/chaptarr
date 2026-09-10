@@ -351,7 +351,7 @@ namespace NzbDrone.Core.Books.Calibre
                 {
                     try
                     {
-                        shelf.PushExternalBookMetadata(book, files, BuildShelfPayload(book, record), CoverUrl(rootFolder.CalibreSettings, record.Id));
+                        shelf.PushExternalBookMetadata(book, files, BuildShelfPayload(book, record), cover);
                     }
                     catch (Exception ex)
                     {
@@ -388,14 +388,6 @@ namespace NzbDrone.Core.Books.Calibre
                 SeriesPosition = record.Position?.ToString(),
                 Genres = record.Tags ?? new List<string>()
             };
-        }
-
-        private static string CoverUrl(CalibreSettings settings, int calibreId)
-        {
-            var scheme = settings.UseSsl ? "https" : "http";
-            var urlBase = settings.UrlBase.IsNullOrWhiteSpace() ? string.Empty : "/" + settings.UrlBase.Trim('/');
-
-            return scheme + "://" + settings.Host + ":" + settings.Port + urlBase + "/get/cover/" + calibreId + "/" + settings.Library;
         }
 
         public void Dispose()

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using FluentValidation.Results;
 using NLog;
@@ -18,6 +19,8 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
         void ScanItem(AudioBookShelfSettings settings, string itemId);
         void UpdateItemMetadata(AudioBookShelfSettings settings, string itemId, AudioBookShelfItemMetadata metadata);
         void UpdateItemCover(AudioBookShelfSettings settings, string itemId, string coverPath);
+        void UploadItemCover(AudioBookShelfSettings settings, string itemId, byte[] image, string fileName);
+        void PurgeCoverCache(AudioBookShelfSettings settings);
         void UpdateWatchedPath(AudioBookShelfSettings settings, string libraryId, string path, string type, string oldPath = null);
         ValidationFailure Test(AudioBookShelfSettings settings);
         List<AudioBookShelfLibrary> GetLibraries(AudioBookShelfSettings settings);
@@ -323,6 +326,64 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             if (response.HasHttpError)
             {
                 throw new HttpException(response);
+            }
+        }
+
+        public void UploadItemCover(AudioBookShelfSettings settings, string itemId, byte[] image, string fileName)
+        {
+            if (itemId.IsNullOrWhiteSpace() || image == null || image.Length == 0)
+            {
+                return;
+            }
+
+            var extension = Path.GetExtension(fileName)?.ToLowerInvariant();
+            var contentType = extension switch
+            {
+                ".png" => "image/png",
+                ".webp" => "image/webp",
+                _ => "image/jpeg"
+            };
+
+            var baseUrl = HttpRequestBuilder.BuildBaseUrl(settings.UseSsl, settings.Host.ToUrlHost(), settings.Port, settings.UrlBase);
+            var request = new HttpRequestBuilder(baseUrl)
+                .Resource($"/api/items/{itemId}/cover")
+                .Post()
+                .AddFormUpload("cover", fileName, image, contentType)
+                .Build();
+
+            request.RequestTimeout = RequestTimeout;
+            request.Headers.Add("User-Agent", "Chaptarr");
+            request.Headers.Add("Authorization", $"Bearer {settings.ApiKey}");
+
+            var response = _httpClient.Execute(request);
+
+            if (response.HasHttpError)
+            {
+                throw new HttpException(response);
+            }
+        }
+
+        public void PurgeCoverCache(AudioBookShelfSettings settings)
+        {
+            // Re-pointing an item at the same cover path leaves the server-side resized
+            // thumbnails (/metadata/cache/covers/*_400.webp) showing the old art.
+            try
+            {
+                var request = BuildRequest(settings, "/api/cache/purge");
+                request.Method = HttpMethod.Post;
+                request.Headers.ContentType = "application/json";
+                request.SetContent("{}");
+
+                var response = _httpClient.Execute(request);
+
+                if (response.HasHttpError)
+                {
+                    throw new HttpException(response);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "AudioBookShelf: cover cache purge failed");
             }
         }
 

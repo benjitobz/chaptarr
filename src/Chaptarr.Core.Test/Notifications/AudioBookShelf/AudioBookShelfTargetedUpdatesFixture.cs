@@ -401,6 +401,14 @@ namespace Chaptarr.Core.Test.Notifications.AudioBookShelf
                 GetLibrariesCallCount++;
                 return Libraries;
             }
+
+            public List<AudioBookShelfLibraryItemSummary> GetLibraryItems(AudioBookShelfSettings settings, string libraryId) => new List<AudioBookShelfLibraryItemSummary>();
+            public void ScanItem(AudioBookShelfSettings settings, string itemId) { }
+            public void UpdateItemMetadata(AudioBookShelfSettings settings, string itemId, AudioBookShelfItemMetadata metadata) { }
+            public void UpdateItemCover(AudioBookShelfSettings settings, string itemId, string coverPath) { }
+            public void UploadItemCover(AudioBookShelfSettings settings, string itemId, byte[] image, string fileName) { }
+            public void PurgeCoverCache(AudioBookShelfSettings settings) { }
+            public void RemoveItemsWithIssues(AudioBookShelfSettings settings, string libraryId) { }
         }
 
         private class FakeRootFolderService : IRootFolderService

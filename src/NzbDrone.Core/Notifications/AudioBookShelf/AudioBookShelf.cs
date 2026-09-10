@@ -304,7 +304,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             };
         }
 
-        public void PushExternalBookMetadata(Book book, List<BookFile> files, AudioBookShelfItemMetadata payload, string coverUrl)
+        public void PushExternalBookMetadata(Book book, List<BookFile> files, AudioBookShelfItemMetadata payload, byte[] coverBytes)
         {
             // Values forwarded from the library that owns the files, not read from
             // Chaptarr's own records - see CalibreLibraryChangeForwarder.
@@ -319,6 +319,8 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             {
                 return;
             }
+
+            var pushedCover = false;
 
             foreach (var libraryId in MappedLibraryIds(mappings))
             {
@@ -354,9 +356,13 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                     {
                         _proxy.UpdateItemMetadata(Settings, item.Id, payload);
 
-                        if (coverUrl.IsNotNullOrWhiteSpace())
+                        if (coverBytes?.Length > 0)
                         {
-                            _proxy.UpdateItemCover(Settings, item.Id, coverUrl);
+                            // Uploaded as bytes: AudioBookShelf's cover endpoint takes a path on
+                            // its own host and rejects an http url outright, and re-pointing it at
+                            // an unchanged path is a no-op that leaves the old art in place.
+                            _proxy.UploadItemCover(Settings, item.Id, coverBytes, "cover.jpg");
+                            pushedCover = true;
                         }
 
                         _logger.Debug("AudioBookShelf: forwarded library metadata for '{0}'", resolved.Value.RelativePath);
@@ -366,6 +372,12 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                         _logger.Debug(ex, "AudioBookShelf: forward failed for '{0}'", resolved.Value.RelativePath);
                     }
                 }
+            }
+
+            if (pushedCover)
+            {
+                // Regenerate resized thumbnails from the refreshed covers.
+                _proxy.PurgeCoverCache(Settings);
             }
         }
 
