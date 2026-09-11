@@ -92,6 +92,10 @@ namespace Chaptarr.Core.Test.Api
             };
 
             var controller = new BookController(
+                mediaCoverProxy: Proxy<IMediaCoverProxy>(new Dictionary<string, Func<MethodInfo, object[], object>>
+                {
+                    [nameof(IMediaCoverProxy.IsProxyUrl)] = (_, _) => false
+                }),
                 authorService: Proxy<IAuthorService>(new Dictionary<string, Func<MethodInfo, object[], object>>
                 {
                     [nameof(IAuthorService.GetAuthor)] = (_, _) => author
@@ -205,6 +209,10 @@ namespace Chaptarr.Core.Test.Api
                 }
             });
             var controller = new BookController(
+                mediaCoverProxy: Proxy<IMediaCoverProxy>(new Dictionary<string, Func<MethodInfo, object[], object>>
+                {
+                    [nameof(IMediaCoverProxy.IsProxyUrl)] = (_, _) => false
+                }),
                 authorService: Proxy<IAuthorService>(new Dictionary<string, Func<MethodInfo, object[], object>>
                 {
                     [nameof(IAuthorService.EnsureMediaTypeMonitoring)] = (_, args) =>

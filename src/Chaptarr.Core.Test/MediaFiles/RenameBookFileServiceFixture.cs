@@ -17,6 +17,7 @@ using NzbDrone.Core.MediaFiles.Events;
 using NzbDrone.Core.Messaging.Events;
 using NzbDrone.Core.Organizer;
 using NzbDrone.Core.Qualities;
+using NzbDrone.Core.RootFolders;
 
 namespace Chaptarr.Core.Test.MediaFiles
 {
@@ -137,6 +138,16 @@ namespace Chaptarr.Core.Test.MediaFiles
             public string GetImportDestinationPath(BookFile bookFile, NzbDrone.Core.Parser.Model.LocalBook localBook) => throw new NotImplementedException();
         }
 
+        private class EmptyRootFolderServiceProxy : DispatchProxy
+        {
+            protected override object Invoke(MethodInfo targetMethod, object[] args)
+            {
+                return targetMethod?.Name == nameof(IRootFolderService.All)
+                    ? new List<RootFolder>()
+                    : null;
+            }
+        }
+
         private class ThrowingProxy<T> : DispatchProxy where T : class
         {
             protected override object Invoke(MethodInfo targetMethod, object[] args)
@@ -207,6 +218,7 @@ namespace Chaptarr.Core.Test.MediaFiles
                 mover,
                 eventAggregator,
                 diskProvider ?? DispatchProxy.Create<IDiskProvider, DiskProviderProxy>(),
+                DispatchProxy.Create<IRootFolderService, EmptyRootFolderServiceProxy>(),
                 LogManager.GetCurrentClassLogger());
         }
 

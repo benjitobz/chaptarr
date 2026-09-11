@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Threading;
 using NLog;
 using NUnit.Framework;
+using NzbDrone.Core.Books;
 using NzbDrone.Common.Disk;
 using NzbDrone.Core.Configuration;
 using NzbDrone.Core.MediaFiles;
@@ -18,6 +19,16 @@ namespace Chaptarr.Core.Test.MediaFiles
     [TestFixture]
     public class RootFolderWatchingServiceFixture
     {
+        private class EmptyAuthorServiceProxy : DispatchProxy
+        {
+            protected override object Invoke(MethodInfo targetMethod, object[] args)
+            {
+                return targetMethod?.Name == nameof(IAuthorService.AllAuthorPaths)
+                    ? new Dictionary<int, string>()
+                    : null;
+            }
+        }
+
         private class ThrowingProxy<T> : DispatchProxy where T : class
         {
             protected override object Invoke(MethodInfo targetMethod, object[] args)
@@ -248,6 +259,7 @@ namespace Chaptarr.Core.Test.MediaFiles
 
             return new RootFolderWatchingService(
                 DispatchProxy.Create<IRootFolderService, ThrowingProxy<IRootFolderService>>(),
+                DispatchProxy.Create<IAuthorService, EmptyAuthorServiceProxy>(),
                 commandQueueManager,
                 config,
                 diskProvider,

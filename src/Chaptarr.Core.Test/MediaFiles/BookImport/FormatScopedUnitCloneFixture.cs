@@ -283,6 +283,9 @@ namespace Chaptarr.Core.Test.MediaFiles.BookImport
                 bookService: bookService,
                 editionService: editionService,
                 mainDatabase: new StubMainDatabase(),
+                rootFolderService: null,
+                authorService: null,
+                diskProvider: null,
                 logger: logger);
 
             string BuildDestKey(string filePath) =>
@@ -379,6 +382,9 @@ namespace Chaptarr.Core.Test.MediaFiles.BookImport
                 bookService: bookService,
                 editionService: editionService,
                 mainDatabase: new StubMainDatabase(),
+                rootFolderService: null,
+                authorService: null,
+                diskProvider: null,
                 logger: logger);
 
             var cloneUnitKey = unitDestination.BuildRootUnitKeyWithExtension(cloneFile.Path, canonicalBook.Title, canonicalBook.MediaType);
@@ -445,6 +451,9 @@ namespace Chaptarr.Core.Test.MediaFiles.BookImport
                 bookService: bookService,
                 editionService: editionService,
                 mainDatabase: new StubMainDatabase(),
+                rootFolderService: null,
+                authorService: null,
+                diskProvider: null,
                 logger: logger);
 
             var unitKey = unitDestination.BuildRootUnitKeyWithExtension("/incoming/Dune/Dune.m4b", canonicalBook.Title, canonicalBook.MediaType);
@@ -510,6 +519,9 @@ namespace Chaptarr.Core.Test.MediaFiles.BookImport
                 bookService: bookService,
                 editionService: editionService,
                 mainDatabase: new StubMainDatabase(),
+                rootFolderService: null,
+                authorService: null,
+                diskProvider: null,
                 logger: logger);
 
             var unitKey = unitDestination.BuildRootUnitKeyWithExtension("/incoming/Dune/Dune.m4b", canonicalBook.Title, canonicalBook.MediaType);
@@ -556,6 +568,9 @@ namespace Chaptarr.Core.Test.MediaFiles.BookImport
                 bookService,
                 editionService,
                 new StubMainDatabase(),
+                null,
+                null,
+                null,
                 logger);
 
             var unitKey = unitDestination.BuildRootUnitKeyWithExtension("/incoming/Dune/Dune.m4b", matchedEdition.Title, canonicalBook.MediaType);
@@ -608,6 +623,9 @@ namespace Chaptarr.Core.Test.MediaFiles.BookImport
                 bookService,
                 editionService,
                 new StubMainDatabase(),
+                null,
+                null,
+                null,
                 logger);
             var unitKey = unitDestination.BuildRootUnitKeyWithExtension("/incoming/Dune/Dune.m4b", matchedEdition.Title, canonicalBook.MediaType);
 
@@ -676,6 +694,9 @@ namespace Chaptarr.Core.Test.MediaFiles.BookImport
                 bookService: bookService,
                 editionService: editionService,
                 mainDatabase: new StubMainDatabase(),
+                rootFolderService: null,
+                authorService: null,
+                diskProvider: null,
                 logger: logger);
 
             var unitKey = unitDestination.BuildRootUnitKeyWithExtension("/incoming/Frank Herbert/Dune/Dune.mp3", canonicalBook.Title, canonicalBook.MediaType);
@@ -698,6 +719,9 @@ namespace Chaptarr.Core.Test.MediaFiles.BookImport
                 bookService: new InMemoryBookService(Array.Empty<Book>()),
                 editionService: new InMemoryEditionService(Array.Empty<Edition>()),
                 mainDatabase: new StubMainDatabase(),
+                rootFolderService: null,
+                authorService: null,
+                diskProvider: null,
                 logger: logger);
 
             var alpha = unitDestination.BuildRootUnitKeyWithExtension("/incoming/Dune/Alpha.m4b", "Alpha", BookMediaType.Audiobook);
@@ -767,6 +791,9 @@ namespace Chaptarr.Core.Test.MediaFiles.BookImport
                 bookService: bookService,
                 editionService: editionService,
                 mainDatabase: new StubMainDatabase(),
+                rootFolderService: null,
+                authorService: null,
+                diskProvider: null,
                 logger: logger);
 
             var unitKey = unitDestination.BuildRootUnitKeyWithExtension("/incoming/Dune/Dune.m4b", canonicalBook.Title, canonicalBook.MediaType);
