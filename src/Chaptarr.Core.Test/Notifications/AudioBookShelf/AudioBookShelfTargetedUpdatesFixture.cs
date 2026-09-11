@@ -18,6 +18,81 @@ namespace Chaptarr.Core.Test.Notifications.AudioBookShelf
     public class AudioBookShelfTargetedUpdatesFixture
     {
         [Test]
+        public void cover_event_push_should_not_overwrite_item_metadata()
+        {
+            var proxy = BuildPushProxy();
+            var subject = CreatePushSubject(proxy);
+
+            subject.PushBooksCovers(BuildPushableBook());
+
+            Assert.That(proxy.MetadataUpdates, Is.Empty);
+        }
+
+        [Test]
+        public void library_edit_push_should_still_send_item_metadata()
+        {
+            var proxy = BuildPushProxy();
+            var subject = CreatePushSubject(proxy);
+
+            subject.PushBooksMetadata(BuildPushableBook());
+
+            Assert.That(proxy.MetadataUpdates, Is.EqualTo(new[] { "item-1" }));
+        }
+
+        private static FakeAudioBookShelfProxy BuildPushProxy()
+        {
+            return new FakeAudioBookShelfProxy
+            {
+                Libraries = new List<AudioBookShelfLibrary>
+                {
+                    BuildLibrary("library-audio", "folder-audio", "/abs/audio", disableWatcher: false)
+                },
+                Items = new List<AudioBookShelfLibraryItemSummary>
+                {
+                    new AudioBookShelfLibraryItemSummary
+                    {
+                        Id = "item-1",
+                        RelPath = "Joe Abercrombie/The Blade Itself"
+                    }
+                }
+            };
+        }
+
+        private static NzbDrone.Core.Notifications.AudioBookShelf.AudioBookShelf CreatePushSubject(FakeAudioBookShelfProxy proxy)
+        {
+            return CreateSubject(proxy, new List<RootFolder>
+            {
+                new RootFolder { Id = 1, Path = "/audiobooks", FolderType = FolderType.Audiobook }
+            }, new List<AudioBookShelfLibraryMapping>
+            {
+                new AudioBookShelfLibraryMapping
+                {
+                    RootFolderId = 1,
+                    MediaType = "audiobook",
+                    LibraryId = "library-audio",
+                    LibraryFolderId = "folder-audio",
+                    LibraryFolderPath = "/abs/audio"
+                }
+            });
+        }
+
+        private static List<(Book Book, List<BookFile> Files)> BuildPushableBook()
+        {
+            return new List<(Book Book, List<BookFile> Files)>
+            {
+                (new Book { Title = "The Blade Itself", MediaType = BookMediaType.Audiobook },
+                 new List<BookFile>
+                 {
+                     new BookFile
+                     {
+                         Path = "/audiobooks/Joe Abercrombie/The Blade Itself/The Blade Itself.m4b",
+                         MediaType = "audiobook"
+                     }
+                 })
+            };
+        }
+
+        [Test]
         public void should_send_targeted_add_for_mapped_import()
         {
             var proxy = new FakeAudioBookShelfProxy
@@ -404,9 +479,15 @@ namespace Chaptarr.Core.Test.Notifications.AudioBookShelf
                 return Libraries;
             }
 
-            public List<AudioBookShelfLibraryItemSummary> GetLibraryItems(AudioBookShelfSettings settings, string libraryId) => new List<AudioBookShelfLibraryItemSummary>();
+            public List<AudioBookShelfLibraryItemSummary> Items { get; set; } = new List<AudioBookShelfLibraryItemSummary>();
+            public List<string> MetadataUpdates { get; } = new List<string>();
+
+            public List<AudioBookShelfLibraryItemSummary> GetLibraryItems(AudioBookShelfSettings settings, string libraryId) => Items;
             public void ScanItem(AudioBookShelfSettings settings, string itemId) { }
-            public void UpdateItemMetadata(AudioBookShelfSettings settings, string itemId, AudioBookShelfItemMetadata metadata) { }
+            public void UpdateItemMetadata(AudioBookShelfSettings settings, string itemId, AudioBookShelfItemMetadata metadata)
+            {
+                MetadataUpdates.Add(itemId);
+            }
             public void UpdateItemCover(AudioBookShelfSettings settings, string itemId, string coverPath) { }
             public void UploadItemCover(AudioBookShelfSettings settings, string itemId, byte[] image, string fileName) { }
             public void PurgeCoverCache(AudioBookShelfSettings settings) { }
