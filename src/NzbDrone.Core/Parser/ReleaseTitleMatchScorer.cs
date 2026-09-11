@@ -87,6 +87,7 @@ namespace NzbDrone.Core.Parser
         private static readonly Regex NumericTokenRegex = new Regex(@"^\d+(?:\.\d+)?$", RegexOptions.Compiled);
         private static readonly Regex BareSeriesPositionRegex = new Regex(@"^\s*#?\s*(?<number>\d+(?:\.\d+)?)(?:\s*,?\s*(?:part|pt)\s+\d+\s+of\s+\d+)?\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private static readonly Regex MarkedSeriesPositionRegex = new Regex(@"^\s*(?:book|bk|vol|volume|tome)\s+#?\s*(?<number>\d+(?:\.\d+)?)(?:\s*,?\s*(?:part|pt)\s+\d+\s+of\s+\d+)?\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex SeriesSubtitleSuffixRegex = new Regex(@"^(?<series>.+?)\s*,\s*(?<position>(?:book|bk|vol|volume|tome)\s+#?\s*\d+(?:\.\d+)?)\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly HashSet<string> KnownLanguageNames = CultureInfo.GetCultures(CultureTypes.NeutralCultures)
             .Select(culture => NormalizeLanguageName(culture.EnglishName))
@@ -884,6 +885,11 @@ namespace NzbDrone.Core.Parser
             var primaryTitle = GetPrimaryBookTitle(book);
 
             AddTitleVariants(context.PrimaryVariants, primaryTitle);
+            if (TryGetSeriesSubtitleBaseTitle(primaryTitle, book?.SeriesName, book?.SeriesPosition, out var seriesSubtitleBaseTitle))
+            {
+                AddTitleVariants(context.PrimaryVariants, seriesSubtitleBaseTitle);
+            }
+
             context.PrimaryTitle = primaryTitle;
 
             foreach (var variant in context.PrimaryVariants)
@@ -1058,6 +1064,71 @@ namespace NzbDrone.Core.Parser
             }
 
             return false;
+        }
+
+        // Audible-style edition titles restate the series after the colon:
+        // "Throne of Glass: Throne of Glass, Book 1". Nothing on a tracker is
+        // ever named that, so with only the full title to score every candidate
+        // was rejected as a title mismatch and the book sat in Wanted forever.
+        // The edition that carries this shape leaves Subtitle empty, so
+        // TryGetKnownSubtitleBaseTitle cannot see it.
+        //
+        // The suffix is dropped only when it demonstrably repeats this book's
+        // own series and position. A genuine subtitle ("Dune: Messiah") has no
+        // series-position tail and is left alone, and a suffix naming a
+        // different entry is kept so the title cannot match a sibling book.
+        internal static bool TryGetSeriesSubtitleBaseTitle(string title, string seriesName, string seriesPosition, out string baseTitle)
+        {
+            baseTitle = null;
+
+            if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(seriesName))
+            {
+                return false;
+            }
+
+            var separator = title.IndexOf(':');
+            if (separator <= 0)
+            {
+                return false;
+            }
+
+            var head = NormalizeExpandedVariant(title.Substring(0, separator));
+            var suffix = NormalizeExpandedVariant(title.Substring(separator + 1));
+            if (string.IsNullOrWhiteSpace(head) || string.IsNullOrWhiteSpace(suffix))
+            {
+                return false;
+            }
+
+            var match = SeriesSubtitleSuffixRegex.Match(suffix);
+            if (!match.Success)
+            {
+                return false;
+            }
+
+            if (!TokenSequenceEquals(match.Groups["series"].Value, seriesName))
+            {
+                return false;
+            }
+
+            if (TryGetSeriesPositionNumber(seriesPosition, out var expectedPosition) &&
+                TryGetSeriesPositionNumber(match.Groups["position"].Value, out var suffixPosition) &&
+                expectedPosition != suffixPosition)
+            {
+                return false;
+            }
+
+            if (string.Equals(head, NormalizeExpandedVariant(title), StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            baseTitle = head;
+            return true;
+        }
+
+        private static bool TokenSequenceEquals(string left, string right)
+        {
+            return Tokenize(left).SequenceEqual(Tokenize(right), StringComparer.OrdinalIgnoreCase);
         }
 
         internal static bool TryGetKnownSubtitleBaseTitle(string fullTitle, string subtitle, out string baseTitle)

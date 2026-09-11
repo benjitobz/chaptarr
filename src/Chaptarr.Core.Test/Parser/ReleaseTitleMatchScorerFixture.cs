@@ -11,6 +11,90 @@ namespace Chaptarr.Core.Test.Parser
     public class ReleaseTitleMatchScorerFixture
     {
         [Test]
+        public void should_match_release_when_edition_title_restates_the_series_subtitle()
+        {
+            var author = new Author { Name = "Sarah J. Maas" };
+            var book = new Book
+            {
+                Title = "Throne of Glass",
+                Author = author,
+                SeriesName = "Throne of Glass",
+                SeriesPosition = "1",
+                Editions = new List<Edition>
+                {
+                    new Edition { Id = 1, Title = "Throne of Glass: Throne of Glass, Book 1", Monitored = true }
+                }
+            };
+
+            var result = ReleaseTitleMatchScorer.FindBestMatch(
+                "Throne of Glass by Sarah J Maas [ENG / M4B]",
+                "Sarah J. Maas",
+                new[] { book },
+                "Sarah J Maas",
+                new[] { book });
+
+            Assert.That(result, Is.Not.Null);
+            Assert.That(result.IsMatch, Is.True);
+            Assert.That(result.MatchedVariant, Is.EqualTo("Throne of Glass"));
+        }
+
+        [Test]
+        public void should_strip_series_subtitle_that_repeats_the_books_own_series()
+        {
+            Assert.That(
+                ReleaseTitleMatchScorer.TryGetSeriesSubtitleBaseTitle(
+                    "Throne of Glass: Throne of Glass, Book 1", "Throne of Glass", "1", out var baseTitle),
+                Is.True);
+            Assert.That(baseTitle, Is.EqualTo("Throne of Glass"));
+        }
+
+        [Test]
+        public void should_strip_series_subtitle_naming_a_different_series_title()
+        {
+            Assert.That(
+                ReleaseTitleMatchScorer.TryGetSeriesSubtitleBaseTitle(
+                    "Golden Son: Red Rising Saga, Book 2", "Red Rising Saga", "2", out var baseTitle),
+                Is.True);
+            Assert.That(baseTitle, Is.EqualTo("Golden Son"));
+        }
+
+        [Test]
+        public void should_not_strip_a_genuine_subtitle_without_a_series_position()
+        {
+            Assert.That(
+                ReleaseTitleMatchScorer.TryGetSeriesSubtitleBaseTitle(
+                    "Dune: Messiah", "Dune", "2", out _),
+                Is.False);
+        }
+
+        [Test]
+        public void should_not_strip_a_series_subtitle_naming_a_different_entry()
+        {
+            Assert.That(
+                ReleaseTitleMatchScorer.TryGetSeriesSubtitleBaseTitle(
+                    "Throne of Glass: Throne of Glass, Book 4", "Throne of Glass", "1", out _),
+                Is.False);
+        }
+
+        [Test]
+        public void should_not_strip_a_series_subtitle_belonging_to_another_series()
+        {
+            Assert.That(
+                ReleaseTitleMatchScorer.TryGetSeriesSubtitleBaseTitle(
+                    "Some Book: A Different Saga, Book 1", "Throne of Glass", "1", out _),
+                Is.False);
+        }
+
+        [Test]
+        public void should_not_strip_when_the_book_has_no_series()
+        {
+            Assert.That(
+                ReleaseTitleMatchScorer.TryGetSeriesSubtitleBaseTitle(
+                    "Throne of Glass: Throne of Glass, Book 1", null, null, out _),
+                Is.False);
+        }
+
+        [Test]
         public void should_return_source_spans_for_backend_title_tokens()
         {
             var tokens = ReleaseTitleMatchScorer.TokenizeWithSpans("HANDMAID'S & Café 1.5");
