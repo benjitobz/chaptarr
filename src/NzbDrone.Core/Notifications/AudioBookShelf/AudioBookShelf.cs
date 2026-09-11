@@ -392,6 +392,23 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
         public void PushBooksMetadata(List<(Book Book, List<BookFile> Files)> books)
         {
+            PushBooks(books, includeMetadata: true);
+        }
+
+        // A cover refresh is not a library edit. MediaCoversUpdatedEvent is raised by
+        // routine work - an author refresh, the daily cover repair, the deferred cover
+        // flush after every import - and carries no information about metadata having
+        // changed. Re-sending the whole block from Chaptarr's database on that signal
+        // silently overwrote whatever the AudioBookShelf item held, genres included.
+        // Covers are the one thing the event actually knows about, so that is all it
+        // sends; real edits still reach AudioBookShelf through PushExternalLibraryEdit.
+        public void PushBooksCovers(List<(Book Book, List<BookFile> Files)> books)
+        {
+            PushBooks(books, includeMetadata: false);
+        }
+
+        private void PushBooks(List<(Book Book, List<BookFile> Files)> books, bool includeMetadata)
+        {
             var pushable = books.Where(x => x.Files.Count > 0).ToList();
 
             if (pushable.Count == 0)
@@ -423,8 +440,6 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
                 foreach (var (book, files) in pushable)
                 {
-                    var payload = BuildItemMetadata(book);
-
                     foreach (var folder in DistinctFolders(files))
                     {
                         var resolved = ResolveLibraryRelativePath(folder);
@@ -441,14 +456,19 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                             continue;
                         }
 
-                        try
+                        if (includeMetadata)
                         {
-                            _proxy.UpdateItemMetadata(Settings, item.Id, payload);
-                            _logger.Debug("AudioBookShelf: pushed metadata for '{0}' ({1} genre(s))", resolved.Value.RelativePath, payload.Genres?.Count ?? 0);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.Debug(ex, "AudioBookShelf: metadata push failed for '{0}'", resolved.Value.RelativePath);
+                            var payload = BuildItemMetadata(book);
+
+                            try
+                            {
+                                _proxy.UpdateItemMetadata(Settings, item.Id, payload);
+                                _logger.Debug("AudioBookShelf: pushed metadata for '{0}' ({1} genre(s))", resolved.Value.RelativePath, payload.Genres?.Count ?? 0);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.Debug(ex, "AudioBookShelf: metadata push failed for '{0}'", resolved.Value.RelativePath);
+                            }
                         }
 
                         PushItemCover(Settings, mappings, resolved.Value.RootFolder.Id, libraryId, item.Id, folder, resolved.Value.RelativePath);
