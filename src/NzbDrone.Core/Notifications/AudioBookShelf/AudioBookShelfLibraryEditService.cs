@@ -87,13 +87,13 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             {
                 try
                 {
-                    shelf.PushBooksMetadata(books);
+                    shelf.PushBooksCovers(books);
                     _notificationStatusService.RecordSuccess(shelf.Definition.Id);
                 }
                 catch (Exception ex)
                 {
                     _notificationStatusService.RecordFailure(shelf.Definition.Id);
-                    _logger.Warn(ex, "Unable to push metadata to AudioBookShelf: " + shelf.Definition.Name);
+                    _logger.Warn(ex, "Unable to push covers to AudioBookShelf: " + shelf.Definition.Name);
                 }
             }
         }
