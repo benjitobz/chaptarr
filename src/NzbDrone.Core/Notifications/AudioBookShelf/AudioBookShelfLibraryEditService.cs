@@ -7,6 +7,7 @@ using NzbDrone.Core.Books;
 using NzbDrone.Core.MediaCover;
 using NzbDrone.Core.MediaFiles;
 using NzbDrone.Core.RootFolders;
+using NzbDrone.Core.Messaging;
 using NzbDrone.Core.Messaging.Events;
 using NzbDrone.Core.ThingiProvider;
 
@@ -36,6 +37,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
             _logger = logger;
         }
 
+        [EventHandleOrder(EventHandleOrder.Last)]
         public void Handle(MediaCoversUpdatedEvent message)
         {
             // AudioBookShelf keeps its own copy of an item's metadata and only re-reads
