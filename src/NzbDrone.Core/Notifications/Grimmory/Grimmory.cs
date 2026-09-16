@@ -272,6 +272,12 @@ namespace NzbDrone.Core.Notifications.Grimmory
                 return;
             }
 
+            if (!payload.Manual && Settings.HasIgnoreTag(grimmoryBook.Metadata?.Tags))
+            {
+                _logger.Debug("'{0}' carries an ignore tag in Grimmory on {1}; not applying the forwarded edit", book.Title, Settings.Url);
+                return;
+            }
+
             var metadata = new Dictionary<string, object>();
 
             if (Settings.PushMetadata)

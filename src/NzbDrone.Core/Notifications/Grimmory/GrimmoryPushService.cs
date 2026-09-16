@@ -138,6 +138,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
                 return;
             }
 
+            var manual = message.Trigger == CommandTrigger.Manual;
             var pushed = 0;
             var failed = 0;
 
@@ -145,7 +146,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
             {
                 try
                 {
-                    if (PushBook(bookId, fields, connections, message.WaitForBook))
+                    if (PushBook(bookId, fields, connections, message.WaitForBook, manual))
                     {
                         pushed++;
                     }
@@ -165,7 +166,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
             }
         }
 
-        private bool PushBook(int bookId, List<string> fields, List<Grimmory> connections, bool waitForBook)
+        private bool PushBook(int bookId, List<string> fields, List<Grimmory> connections, bool waitForBook, bool manual)
         {
             var book = _bookService.GetBook(bookId);
 
@@ -188,6 +189,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
             var editions = _editionService.GetEditionsByBook(book.Id);
             var edition = editions.FirstOrDefault(e => e.Monitored) ?? editions.FirstOrDefault();
             var anyPushed = false;
+            var anyMatched = false;
 
             foreach (var connection in connections)
             {
@@ -204,6 +206,14 @@ namespace NzbDrone.Core.Notifications.Grimmory
                 if (grimmoryBook == null)
                 {
                     _logger.Debug("'{0}' not found in Grimmory library {1} on {2}; skipping", book.Title, libraryId, settings.Url);
+                    continue;
+                }
+
+                anyMatched = true;
+
+                if (!manual && settings.HasIgnoreTag(grimmoryBook.Metadata?.Tags))
+                {
+                    _logger.Debug("'{0}' carries an ignore tag in Grimmory on {1}; skipping the automatic push", book.Title, settings.Url);
                     continue;
                 }
 
@@ -240,9 +250,9 @@ namespace NzbDrone.Core.Notifications.Grimmory
                 anyPushed = true;
             }
 
-            if (anyPushed)
+            if (anyMatched)
             {
-                PushToOtherTargets(book, files, edition, fields, connections);
+                PushToOtherTargets(book, files, edition, fields, connections, manual);
             }
 
             return anyPushed;
@@ -251,7 +261,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
         // Grimmory rewrites its sidecar in response to this push and the forwarder drops that
         // event as an echo, so the other connections have to be told here or they keep showing
         // the pre-push values.
-        private void PushToOtherTargets(Book book, List<BookFile> files, Edition edition, List<string> fields, List<Grimmory> connections)
+        private void PushToOtherTargets(Book book, List<BookFile> files, Edition edition, List<string> fields, List<Grimmory> connections, bool manual)
         {
             var alreadyPushed = new HashSet<int>(connections.Select(c => c.Definition.Id));
 
@@ -266,6 +276,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
             }
 
             var payload = BuildEditPayload(book, edition, fields);
+            payload.Manual = manual;
 
             foreach (var target in targets)
             {

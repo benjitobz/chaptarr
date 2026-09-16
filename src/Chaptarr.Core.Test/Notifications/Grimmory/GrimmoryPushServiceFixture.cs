@@ -341,6 +341,99 @@ namespace Chaptarr.Core.Test.Notifications.Grimmory
             }
         }
 
+        private const string ApprenticePath = "Robin Hobb/Assassin's Apprentice/Assassin's Apprentice.epub";
+
+        private static Context CreateIgnoringContext()
+        {
+            var context = CreateContext();
+            context.Settings.IgnoreTags = new[] { "Processed" };
+
+            var grimmoryBook = GrimmoryBookAt(ApprenticePath);
+            grimmoryBook.Metadata = new GrimmoryBookMetadata { Tags = new List<string> { "Fantasy", "processed" } };
+            context.Proxy.BooksByPath[ApprenticePath] = grimmoryBook;
+
+            return context;
+        }
+
+        [Test]
+        public void automatic_push_should_skip_a_book_with_an_ignore_tag_but_still_mirror()
+        {
+            var context = CreateIgnoringContext();
+
+            context.Service.Execute(new PushGrimmoryMetadataCommand
+            {
+                BookIds = new List<int> { 10 },
+                Fields = new List<string> { "title", "description" }
+            });
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(context.Proxy.MetadataUpdates, Is.Empty);
+                Assert.That(GrimmoryPushRegistry.WasRecentlyPushed(10), Is.False);
+                Assert.That(context.Target.Pushes, Has.Count.EqualTo(1));
+                Assert.That(context.Target.Pushes[0].Payload.Manual, Is.False);
+            });
+        }
+
+        [Test]
+        public void manual_push_should_update_a_book_with_an_ignore_tag()
+        {
+            var context = CreateIgnoringContext();
+            var command = new PushGrimmoryMetadataCommand
+            {
+                BookIds = new List<int> { 10 },
+                Fields = new List<string> { "title", "description" }
+            };
+            command.Trigger = CommandTrigger.Manual;
+
+            context.Service.Execute(command);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(context.Proxy.MetadataUpdates, Has.Count.EqualTo(1));
+                Assert.That(context.Target.Pushes, Has.Count.EqualTo(1));
+                Assert.That(context.Target.Pushes[0].Payload.Manual, Is.True);
+            });
+        }
+
+        [Test]
+        public void automatic_push_should_still_update_books_without_an_ignore_tag()
+        {
+            var context = CreateContext();
+            context.Settings.IgnoreTags = new[] { "Processed" };
+            context.Proxy.BooksByPath[ApprenticePath] = GrimmoryBookAt(ApprenticePath);
+
+            context.Service.Execute(new PushGrimmoryMetadataCommand
+            {
+                BookIds = new List<int> { 10 },
+                Fields = new List<string> { "title" }
+            });
+
+            Assert.That(context.Proxy.MetadataUpdates, Has.Count.EqualTo(1));
+        }
+
+        [TestCase(false, 0)]
+        [TestCase(true, 1)]
+        public void forwarded_edit_should_reach_a_book_with_an_ignore_tag_only_when_manual(bool manual, int expectedUpdates)
+        {
+            var context = CreateIgnoringContext();
+
+            var rootFolderService = Stub<IRootFolderService>(out var rootStub);
+            rootStub.Handlers["GetBestRootFolder"] = _ => new RootFolder { Id = 1, Path = @"C:\books".AsOsAgnostic() };
+
+            var provider = new NzbDrone.Core.Notifications.Grimmory.Grimmory(context.Proxy, Stub<IManageCommandQueue>(out _), rootFolderService, new CacheManager(), LogManager.GetLogger("test"))
+            {
+                Definition = new NotificationDefinition { Id = 1, Name = "Grimmory", Settings = context.Settings }
+            };
+
+            provider.PushExternalLibraryEdit(
+                new Book { Id = 10, Title = "Assassin's Apprentice", MediaType = BookMediaType.Ebook },
+                new List<BookFile> { new BookFile { Path = @"C:\books\Robin Hobb\Assassin's Apprentice\Assassin's Apprentice.epub".AsOsAgnostic(), MediaType = "ebook" } },
+                new ExternalLibraryEditPayload { Description = "Edited", Manual = manual });
+
+            Assert.That(context.Proxy.MetadataUpdates, Has.Count.EqualTo(expectedUpdates));
+        }
+
         [Test]
         public void should_not_mirror_push_when_nothing_was_pushed_to_grimmory()
         {
