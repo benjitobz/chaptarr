@@ -79,7 +79,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
         [FieldDefinition(7, Label = "Push Library Edits", Type = FieldType.Checkbox, HelpText = "When Chaptarr changes a book - a calibre push, a retag, or an edit - send the current title, description, publisher, series and cover to the matching AudioBookShelf item. AudioBookShelf only re-reads an item when its files are renamed, so without this it keeps whatever it was first scanned with")]
         public bool PushLibraryEdits { get; set; }
 
-        [FieldDefinition(8, Label = "Ignore Tags", Type = FieldType.Tag, HelpText = "Automatic pushes leave AudioBookShelf items that carry any of these tags (e.g. Processed) untouched. A manual push from Chaptarr still updates them")]
+        [FieldDefinition(8, Label = "Ignore AudioBookShelf Tags", Type = FieldType.Tag, HelpText = "Tags set on the item in AudioBookShelf, not Chaptarr tags, e.g. Processed. Automatic pushes leave AudioBookShelf items that carry any of these tags untouched. A manual push from Chaptarr still updates them")]
         public IEnumerable<string> IgnoreTags { get; set; }
 
         public bool HasIgnoreTag(IEnumerable<string> tags)
