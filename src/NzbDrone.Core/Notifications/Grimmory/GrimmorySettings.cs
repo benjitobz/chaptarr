@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using FluentValidation;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.Annotations;
@@ -48,6 +51,19 @@ namespace NzbDrone.Core.Notifications.Grimmory
 
         [FieldDefinition(7, Label = "Forward Grimmory Edits", Type = FieldType.Checkbox, HelpText = "Forward metadata and cover edits made in Grimmory to other connections that accept library edits. Requires Grimmory's sidecar 'write on update' setting so edits appear as sidecar files Chaptarr can watch for")]
         public bool ForwardEdits { get; set; }
+
+        [FieldDefinition(8, Label = "Ignore Tags", Type = FieldType.Tag, HelpText = "Automatic pushes and forwarded edits leave Grimmory books that carry any of these tags (e.g. Processed) untouched. The Grimmory Push dialog and Push Chaptarr Metadata to Grimmory still update them")]
+        public IEnumerable<string> IgnoreTags { get; set; } = Array.Empty<string>();
+
+        public bool HasIgnoreTag(IEnumerable<string> tags)
+        {
+            var ignored = (IgnoreTags ?? Enumerable.Empty<string>())
+                .Where(t => t.IsNotNullOrWhiteSpace())
+                .Select(t => t.Trim())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            return ignored.Count > 0 && (tags ?? Enumerable.Empty<string>()).Any(t => t != null && ignored.Contains(t.Trim()));
+        }
 
         public NzbDroneValidationResult Validate()
         {

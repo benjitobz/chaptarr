@@ -392,6 +392,9 @@ namespace NzbDrone.Core.Notifications.Grimmory
         [JsonProperty("categories")]
         public List<string> Categories { get; set; }
 
+        [JsonProperty("tags")]
+        public List<string> Tags { get; set; }
+
         [JsonProperty("coverLocked")]
         public bool? CoverLocked { get; set; }
 
