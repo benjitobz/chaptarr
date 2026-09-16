@@ -39,7 +39,49 @@ namespace Chaptarr.Core.Test.Notifications.AudioBookShelf
             Assert.That(proxy.MetadataUpdates, Is.EqualTo(new[] { "item-1" }));
         }
 
-        private static FakeAudioBookShelfProxy BuildPushProxy()
+        [Test]
+        public void automatic_push_should_leave_items_with_an_ignore_tag_untouched()
+        {
+            var proxy = BuildPushProxy("processed");
+            var subject = CreatePushSubject(proxy, "Processed");
+
+            subject.PushBooksMetadata(BuildPushableBook());
+
+            Assert.That(proxy.MetadataUpdates, Is.Empty);
+            Assert.That(proxy.CoverUpdates, Is.Empty);
+        }
+
+        [Test]
+        public void automatic_push_should_still_update_items_without_an_ignore_tag()
+        {
+            var proxy = BuildPushProxy("Fantasy");
+            var subject = CreatePushSubject(proxy, "Processed");
+
+            subject.PushBooksMetadata(BuildPushableBook());
+
+            Assert.That(proxy.MetadataUpdates, Is.EqualTo(new[] { "item-1" }));
+        }
+
+        [TestCase(false, 0)]
+        [TestCase(true, 1)]
+        public void forwarded_edit_should_reach_an_ignored_item_only_when_manual(bool manual, int expectedUpdates)
+        {
+            var proxy = BuildPushProxy("Processed");
+            var subject = CreatePushSubject(proxy, "Processed");
+            var (book, files) = BuildPushableBook().Single();
+
+            subject.PushExternalLibraryEdit(book, files, new ExternalLibraryEditPayload
+            {
+                Description = "Edited",
+                CoverUrl = "http://covers/cover.jpg",
+                Manual = manual
+            });
+
+            Assert.That(proxy.MetadataUpdates, Has.Count.EqualTo(expectedUpdates));
+            Assert.That(proxy.CoverUpdates, Has.Count.EqualTo(expectedUpdates));
+        }
+
+        private static FakeAudioBookShelfProxy BuildPushProxy(params string[] itemTags)
         {
             return new FakeAudioBookShelfProxy
             {
@@ -52,15 +94,16 @@ namespace Chaptarr.Core.Test.Notifications.AudioBookShelf
                     new AudioBookShelfLibraryItemSummary
                     {
                         Id = "item-1",
-                        RelPath = "Joe Abercrombie/The Blade Itself"
+                        RelPath = "Joe Abercrombie/The Blade Itself",
+                        Media = new AudioBookShelfLibraryItemMedia { Tags = itemTags.ToList() }
                     }
                 }
             };
         }
 
-        private static NzbDrone.Core.Notifications.AudioBookShelf.AudioBookShelf CreatePushSubject(FakeAudioBookShelfProxy proxy)
+        private static NzbDrone.Core.Notifications.AudioBookShelf.AudioBookShelf CreatePushSubject(FakeAudioBookShelfProxy proxy, params string[] ignoreTags)
         {
-            return CreateSubject(proxy, new List<RootFolder>
+            var subject = CreateSubject(proxy, new List<RootFolder>
             {
                 new RootFolder { Id = 1, Path = "/audiobooks", FolderType = FolderType.Audiobook }
             }, new List<AudioBookShelfLibraryMapping>
@@ -74,6 +117,9 @@ namespace Chaptarr.Core.Test.Notifications.AudioBookShelf
                     LibraryFolderPath = "/abs/audio"
                 }
             });
+
+            ((AudioBookShelfSettings)subject.Definition.Settings).IgnoreTags = ignoreTags;
+            return subject;
         }
 
         private static List<(Book Book, List<BookFile> Files)> BuildPushableBook()
@@ -488,8 +534,17 @@ namespace Chaptarr.Core.Test.Notifications.AudioBookShelf
             {
                 MetadataUpdates.Add(itemId);
             }
-            public void UpdateItemCover(AudioBookShelfSettings settings, string itemId, string coverPath) { }
-            public void UploadItemCover(AudioBookShelfSettings settings, string itemId, byte[] image, string fileName) { }
+            public List<string> CoverUpdates { get; } = new List<string>();
+            public void UpdateItemCover(AudioBookShelfSettings settings, string itemId, string coverPath)
+            {
+                CoverUpdates.Add(itemId);
+            }
+
+            public void UploadItemCover(AudioBookShelfSettings settings, string itemId, byte[] image, string fileName)
+            {
+                CoverUpdates.Add(itemId);
+            }
+
             public void PurgeCoverCache(AudioBookShelfSettings settings) { }
             public void RemoveItemsWithIssues(AudioBookShelfSettings settings, string libraryId) { }
         }

@@ -355,7 +355,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
                     var item = items.FirstOrDefault(i => string.Equals(i.RelPath, resolved.Value.RelativePath, StringComparison.OrdinalIgnoreCase));
 
-                    if (item == null)
+                    if (item == null || (!payload.Manual && IsIgnored(Settings, item, resolved.Value.RelativePath)))
                     {
                         continue;
                     }
@@ -451,7 +451,7 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
 
                         var item = items.FirstOrDefault(i => string.Equals(i.RelPath, resolved.Value.RelativePath, StringComparison.OrdinalIgnoreCase));
 
-                        if (item == null)
+                        if (item == null || IsIgnored(Settings, item, resolved.Value.RelativePath))
                         {
                             continue;
                         }
@@ -475,6 +475,17 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                     }
                 }
             }
+        }
+
+        private bool IsIgnored(AudioBookShelfSettings settings, AudioBookShelfLibraryItemSummary item, string rel)
+        {
+            if (!settings.HasIgnoreTag(item?.Media?.Tags))
+            {
+                return false;
+            }
+
+            _logger.Debug("AudioBookShelf: '{0}' carries an ignore tag, leaving it untouched", rel);
+            return true;
         }
 
         private static List<string> DistinctFolders(List<BookFile> files)
@@ -634,6 +645,11 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
                             // Scan first; metadata pushed before it is overwritten from the files.
                             _proxy.ScanItem(settings, item.Id);
                             _logger.Debug("AudioBookShelf: requested item rescan for '{0}'", rel);
+
+                            if (IsIgnored(settings, item, rel))
+                            {
+                                continue;
+                            }
 
                             if (pair.Value != null)
                             {
