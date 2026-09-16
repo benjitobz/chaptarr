@@ -52,7 +52,7 @@ namespace NzbDrone.Core.Notifications.Grimmory
         [FieldDefinition(7, Label = "Forward Grimmory Edits", Type = FieldType.Checkbox, HelpText = "Forward metadata and cover edits made in Grimmory to other connections that accept library edits. Requires Grimmory's sidecar 'write on update' setting so edits appear as sidecar files Chaptarr can watch for")]
         public bool ForwardEdits { get; set; }
 
-        [FieldDefinition(8, Label = "Ignore Tags", Type = FieldType.Tag, HelpText = "Automatic pushes and forwarded edits leave Grimmory books that carry any of these tags (e.g. Processed) untouched. The Grimmory Push dialog and Push Chaptarr Metadata to Grimmory still update them")]
+        [FieldDefinition(8, Label = "Ignore Grimmory Tags", Type = FieldType.Tag, HelpText = "Tags set on the book in Grimmory, not Chaptarr tags, e.g. Processed. Automatic pushes and forwarded edits leave Grimmory books that carry any of these tags untouched. The Grimmory Push dialog and Push Chaptarr Metadata to Grimmory still update them")]
         public IEnumerable<string> IgnoreTags { get; set; } = Array.Empty<string>();
 
         public bool HasIgnoreTag(IEnumerable<string> tags)
