@@ -20,6 +20,7 @@ namespace NzbDrone.Core.Notifications
         public Dictionary<string, string> Identifiers { get; set; }
         public string CoverUrl { get; set; }
         public byte[] CoverBytes { get; set; }
+        public bool Manual { get; set; }
     }
 
     // Seam between library-edit sources (e.g. the Grimmory forwarder) and connections able to

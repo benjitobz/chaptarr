@@ -40,6 +40,12 @@ namespace NzbDrone.Core.Notifications.AudioBookShelf
     {
         public string Id { get; set; }
         public string RelPath { get; set; }
+        public AudioBookShelfLibraryItemMedia Media { get; set; }
+    }
+
+    public class AudioBookShelfLibraryItemMedia
+    {
+        public List<string> Tags { get; set; }
     }
 
     public class AudioBookShelfProxy : IAudioBookShelfProxy
