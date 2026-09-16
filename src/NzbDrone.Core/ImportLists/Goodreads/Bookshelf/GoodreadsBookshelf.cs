@@ -73,7 +73,7 @@ namespace NzbDrone.Core.ImportLists.Goodreads
                     ? settings.RefreshIntervalMinutes
                     : DefaultRefreshIntervalMinutes;
 
-                return TimeSpan.FromMinutes(minutes);
+                return TimeSpan.FromMinutes(Math.Max(minutes, GoodreadsBookshelfImportListSettings.MinimumRefreshIntervalMinutes));
             }
         }
 
