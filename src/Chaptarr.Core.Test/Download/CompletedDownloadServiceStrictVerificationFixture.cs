@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NLog;
@@ -473,6 +474,164 @@ namespace Chaptarr.Core.Test.Download
             Assert.That(importService.CallCount, Is.EqualTo(3));
             Assert.That(trackedDownload.MissingAuthoritativeMediaFileAttempts, Is.EqualTo(3));
             Assert.That(trackedDownload.State, Is.EqualTo(TrackedDownloadState.ImportBlocked));
+            Assert.That(eventAggregator.Events, Has.One.InstanceOf<BookImportIncompleteEvent>());
+        }
+
+        [Test]
+        public void should_keep_retrying_while_archives_await_extraction_and_import_once_extracted()
+        {
+            var outputPath = Path.Combine(Path.GetTempPath(), "chaptarr-archive-wait");
+            var eventAggregator = new RecordingEventAggregator();
+            var historyService = DispatchProxy.Create<IHistoryService, HistoryServiceProxy>();
+            ((HistoryServiceProxy)(object)historyService).HistoryItems = new List<EntityHistory>
+            {
+                new()
+                {
+                    EventType = EntityHistoryEventType.Grabbed,
+                    DownloadId = "download-archive-wait",
+                    Date = DateTime.UtcNow
+                }
+            };
+
+            var localBook = new LocalBook { Path = outputPath };
+            var rejection = new Rejection("Only archives were found; waiting for extraction", RejectionType.Temporary)
+            {
+                Category = DownloadedBooksImportService.ArchiveAwaitingExtractionRejectionCategory
+            };
+            var importService = new RecordingDownloadedBooksImportService
+            {
+                Results = new List<ImportResult>
+                {
+                    new(new ImportDecision<LocalBook>(localBook, rejection), rejection.Reason)
+                }
+            };
+            var trackedDownload = new TrackedDownload
+            {
+                DownloadClient = 1,
+                DownloadItem = new DownloadClientItem
+                {
+                    DownloadId = "download-archive-wait",
+                    Title = "Archive.Wait",
+                    Status = DownloadItemStatus.Completed,
+                    DownloadClientInfo = new DownloadClientItemClientInfo
+                    {
+                        Id = 1,
+                        Name = "qBittorrent",
+                        Protocol = DownloadProtocol.Torrent
+                    }
+                },
+                RemoteBook = new RemoteBook { Books = new List<Book>() },
+                State = TrackedDownloadState.ImportPending
+            };
+            var subject = new CompletedDownloadService(
+                eventAggregator,
+                historyService,
+                new StubProvideImportItemService(outputPath),
+                importService,
+                new PassthroughDownloadImportModeResolver(),
+                new StubTrackedDownloadAlreadyImported(),
+                NoopFailedDownloadService.Instance,
+                LogManager.GetCurrentClassLogger(),
+                NoopDownloadClientFileSnapshotService.Instance);
+
+            subject.Import(trackedDownload);
+            subject.Import(trackedDownload);
+            subject.Import(trackedDownload);
+            subject.Import(trackedDownload);
+
+            Assert.That(importService.CallCount, Is.EqualTo(4));
+            Assert.That(trackedDownload.State, Is.EqualTo(TrackedDownloadState.ImportPending));
+            Assert.That(trackedDownload.ArchiveExtractionAttempts, Is.EqualTo(4));
+            Assert.That(trackedDownload.MissingAuthoritativeMediaFileAttempts, Is.Zero);
+            Assert.That(trackedDownload.StatusMessages.SelectMany(message => message.Messages), Has.Some.Contains(rejection.Reason));
+            Assert.That(eventAggregator.Events, Has.None.InstanceOf<BookImportIncompleteEvent>());
+
+            importService.Results = new List<ImportResult>
+            {
+                CreateImportedResult(101, 7, "Archive Wait")
+            };
+
+            subject.Import(trackedDownload);
+
+            Assert.That(importService.CallCount, Is.EqualTo(5));
+            Assert.That(trackedDownload.State, Is.EqualTo(TrackedDownloadState.Imported));
+            Assert.That(trackedDownload.ArchiveExtractionAttempts, Is.Zero);
+            Assert.That(trackedDownload.StatusMessages, Is.Empty);
+            Assert.That(eventAggregator.Events, Has.One.InstanceOf<DownloadCompletedEvent>());
+            Assert.That(eventAggregator.Events, Has.None.InstanceOf<BookImportIncompleteEvent>());
+        }
+
+        [Test]
+        public void should_block_once_the_archive_extraction_grace_period_is_exhausted()
+        {
+            var outputPath = Path.Combine(Path.GetTempPath(), "chaptarr-archive-stuck");
+            var eventAggregator = new RecordingEventAggregator();
+            var historyService = DispatchProxy.Create<IHistoryService, HistoryServiceProxy>();
+            ((HistoryServiceProxy)(object)historyService).HistoryItems = new List<EntityHistory>
+            {
+                new()
+                {
+                    EventType = EntityHistoryEventType.Grabbed,
+                    DownloadId = "download-archive-stuck",
+                    Date = DateTime.UtcNow
+                }
+            };
+
+            var localBook = new LocalBook { Path = outputPath };
+            var rejection = new Rejection("Only archives were found; waiting for extraction", RejectionType.Temporary)
+            {
+                Category = DownloadedBooksImportService.ArchiveAwaitingExtractionRejectionCategory
+            };
+            var importService = new RecordingDownloadedBooksImportService
+            {
+                Results = new List<ImportResult>
+                {
+                    new(new ImportDecision<LocalBook>(localBook, rejection), rejection.Reason)
+                }
+            };
+            var trackedDownload = new TrackedDownload
+            {
+                DownloadClient = 1,
+                DownloadItem = new DownloadClientItem
+                {
+                    DownloadId = "download-archive-stuck",
+                    Title = "Archive.Stuck",
+                    Status = DownloadItemStatus.Completed,
+                    DownloadClientInfo = new DownloadClientItemClientInfo
+                    {
+                        Id = 1,
+                        Name = "qBittorrent",
+                        Protocol = DownloadProtocol.Torrent
+                    }
+                },
+                RemoteBook = new RemoteBook { Books = new List<Book>() },
+                State = TrackedDownloadState.ImportPending
+            };
+            var subject = new CompletedDownloadService(
+                eventAggregator,
+                historyService,
+                new StubProvideImportItemService(outputPath),
+                importService,
+                new PassthroughDownloadImportModeResolver(),
+                new StubTrackedDownloadAlreadyImported(),
+                NoopFailedDownloadService.Instance,
+                LogManager.GetCurrentClassLogger(),
+                NoopDownloadClientFileSnapshotService.Instance);
+
+            for (var attempt = 0; attempt < 29; attempt++)
+            {
+                subject.Import(trackedDownload);
+            }
+
+            Assert.That(trackedDownload.State, Is.EqualTo(TrackedDownloadState.ImportPending));
+            Assert.That(trackedDownload.ArchiveExtractionAttempts, Is.EqualTo(29));
+
+            subject.Import(trackedDownload);
+
+            Assert.That(importService.CallCount, Is.EqualTo(30));
+            Assert.That(trackedDownload.ArchiveExtractionAttempts, Is.EqualTo(30));
+            Assert.That(trackedDownload.State, Is.EqualTo(TrackedDownloadState.ImportBlocked));
+            Assert.That(trackedDownload.StatusMessages.SelectMany(message => message.Messages), Has.Some.Contains("Retry Import"));
             Assert.That(eventAggregator.Events, Has.One.InstanceOf<BookImportIncompleteEvent>());
         }
 

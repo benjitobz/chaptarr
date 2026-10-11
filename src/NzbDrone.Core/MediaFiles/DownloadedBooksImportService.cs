@@ -32,6 +32,7 @@ namespace NzbDrone.Core.MediaFiles
     public class DownloadedBooksImportService : IDownloadedBooksImportService
     {
         internal const string MissingAuthoritativeMediaFilesRejectionCategory = "MissingAuthoritativeMediaFiles";
+        internal const string ArchiveAwaitingExtractionRejectionCategory = "ArchiveAwaitingExtraction";
 
         private static readonly HashSet<string> EmbeddedIdentityEvidenceKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -161,6 +162,15 @@ namespace NzbDrone.Core.MediaFiles
             mediaFiles = visibleFiles
                 .Where(f => MediaFileExtensions.AllExtensions.Contains(f.Extension))
                 .ToList();
+
+            if (!mediaFiles.Any() && fileListScoped && visibleFiles.Any(f => ArchiveFileExtensions.IsArchive(f.Extension)))
+            {
+                fileListScoped = false;
+                visibleFiles = _diskProvider.GetFileInfos(directoryInfo.FullName, true);
+                mediaFiles = visibleFiles
+                    .Where(f => MediaFileExtensions.AllExtensions.Contains(f.Extension))
+                    .ToList();
+            }
 
             if (!mediaFiles.Any())
             {
@@ -1291,10 +1301,37 @@ namespace NzbDrone.Core.MediaFiles
 
         private ImportResult NoSupportedMediaFilesResult(string path, IReadOnlyCollection<IFileInfo> visibleFiles, DownloadClientItem downloadClientItem)
         {
+            if (downloadClientItem != null && GetMissingAuthoritativeMediaPaths(downloadClientItem).Count == 0)
+            {
+                var archives = visibleFiles?
+                    .Where(f => f != null && ArchiveFileExtensions.IsArchive(f.Extension))
+                    .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (archives?.Any() == true)
+                {
+                    return ArchiveAwaitingExtractionResult(path, archives);
+                }
+            }
+
             var observedFilesMessage = BuildObservedUnsupportedFilesMessage(path, visibleFiles);
             var reason = $"No supported audio or ebook files were found in {path}.{observedFilesMessage} Check that the download contains supported audio or ebook files and that Chaptarr can read the completed download folder.";
             var localBook = new LocalBook { Path = path };
             var rejection = CreateMissingMediaRejection(reason, downloadClientItem);
+            return new ImportResult(new ImportDecision<LocalBook>(localBook, rejection), reason);
+        }
+
+        private ImportResult ArchiveAwaitingExtractionResult(string path, IReadOnlyCollection<IFileInfo> archives)
+        {
+            var listedArchives = archives.Take(3).Select(f => f.Name).ToList();
+            var remainingCount = archives.Count - listedArchives.Count;
+            var remainingMessage = remainingCount > 0 ? $", and {remainingCount} more" : string.Empty;
+            var reason = $"No supported audio or ebook files were found in {path}, only archive(s): {string.Join(", ", listedArchives)}{remainingMessage}. Chaptarr does not extract archives; waiting for an extraction tool such as Unpackerr to unpack them into this folder, then the import will be retried.";
+            var localBook = new LocalBook { Path = path };
+            var rejection = new Rejection(reason, RejectionType.Temporary)
+            {
+                Category = ArchiveAwaitingExtractionRejectionCategory
+            };
             return new ImportResult(new ImportDecision<LocalBook>(localBook, rejection), reason);
         }
 

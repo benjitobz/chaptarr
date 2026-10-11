@@ -393,7 +393,6 @@ namespace Chaptarr.Core.Test.MediaFiles
         {
             var tempDir = Path.Combine(Path.GetTempPath(), "chaptarr-tests", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(tempDir);
-            var existingArchive = Path.Combine(tempDir, "Book.rar");
             var existingNfo = Path.Combine(tempDir, "Book.nfo");
             var existingMedia = Path.Combine(tempDir, "Book.epub");
             var missingMedia = Path.Combine(tempDir, "Book.m4b");
@@ -401,7 +400,6 @@ namespace Chaptarr.Core.Test.MediaFiles
             var missingMediaThree = Path.Combine(tempDir, "Book Part 3.m4b");
             var missingMediaFour = Path.Combine(tempDir, "Book Part 4.m4b");
             var missingNfo = Path.Combine(tempDir, "Missing.nfo");
-            File.WriteAllBytes(existingArchive, new byte[] { 1, 2, 3, 4 });
             File.WriteAllBytes(existingNfo, new byte[] { 1, 2, 3, 4 });
             File.WriteAllBytes(existingMedia, new byte[] { 1, 2, 3, 4 });
 
@@ -450,7 +448,7 @@ namespace Chaptarr.Core.Test.MediaFiles
                 };
                 var authoritativeNonMediaList = new DownloadClientItem
                 {
-                    FilePaths = new List<string> { existingArchive, missingNfo },
+                    FilePaths = new List<string> { existingNfo, missingNfo },
                     FileListConfidence = DownloadClientFileListConfidence.Authoritative
                 };
                 var partiallyVisibleAuthoritativeMediaList = new DownloadClientItem
@@ -484,6 +482,151 @@ namespace Chaptarr.Core.Test.MediaFiles
                 Assert.That(detailedReason, Does.Not.Contain(missingMediaFour));
                 Assert.That(matchingService.Calls, Is.Empty);
                 Assert.That(importApprovedBooks.Decisions, Is.Empty);
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, recursive: true); } catch { }
+            }
+        }
+
+        [Test]
+        public void should_wait_for_extraction_when_a_tracked_download_only_contains_archives()
+        {
+            var tempDir = Path.Combine(Path.GetTempPath(), "chaptarr-tests", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            var archive = Path.Combine(tempDir, "Book.zip");
+            var readme = Path.Combine(tempDir, "Readme.txt");
+            File.WriteAllBytes(archive, new byte[] { 1, 2, 3, 4 });
+            File.WriteAllBytes(readme, new byte[] { 1, 2, 3, 4 });
+
+            try
+            {
+                var matchingService = new StubFileMatchingService();
+                var importApprovedBooks = new RecordingImportApprovedBooks();
+                var service = new DownloadedBooksImportService(
+                    new StubDiskProvider(),
+                    new StubDiskScanService(),
+                    matchingService,
+                    new StubMetadataTagService(),
+                    importApprovedBooks,
+                    DispatchProxy.Create<IBookService, ThrowingProxy<IBookService>>(),
+                    DispatchProxy.Create<IAuthorService, ThrowingProxy<IAuthorService>>(),
+                    DispatchProxy.Create<IEditionService, ThrowingProxy<IEditionService>>(),
+                    DispatchProxy.Create<IImportOrchestrator, ThrowingProxy<IImportOrchestrator>>(),
+                    new StubAuthorLibraryService(),
+                    new StubRootFolderService(),
+                    ConfigServiceTestProxy.Create(),
+                    DispatchProxy.Create<IHistoryService, ThrowingProxy<IHistoryService>>(),
+                    DispatchProxy.Create<IEventAggregator, ThrowingProxy<IEventAggregator>>(),
+                    DispatchProxy.Create<NzbDrone.Common.EnvironmentInfo.IRuntimeInfo, ThrowingProxy<NzbDrone.Common.EnvironmentInfo.IRuntimeInfo>>(),
+                    DispatchProxy.Create<IMediaInfoExtractor, ThrowingProxy<IMediaInfoExtractor>>(),
+                    LogManager.GetCurrentClassLogger());
+
+                var trackedResult = service.ProcessPath(
+                    tempDir,
+                    ImportMode.Auto,
+                    author: null,
+                    downloadClientItem: new DownloadClientItem
+                    {
+                        FilePaths = new List<string> { archive, readme },
+                        FileListConfidence = DownloadClientFileListConfidence.Authoritative
+                    }).Single();
+                var trackedRejection = trackedResult.ImportDecision.Rejections.Single();
+
+                Assert.That(trackedRejection.Type, Is.EqualTo(RejectionType.Temporary));
+                Assert.That(trackedRejection.Category, Is.EqualTo(DownloadedBooksImportService.ArchiveAwaitingExtractionRejectionCategory));
+                Assert.That(trackedResult.Errors.Single(), Does.Contain("Book.zip"));
+                Assert.That(trackedResult.Errors.Single(), Does.Not.Contain("Readme.txt"));
+                Assert.That(matchingService.Calls, Is.Empty);
+                Assert.That(importApprovedBooks.Decisions, Is.Empty);
+
+                var manualResult = service.ProcessPath(tempDir, ImportMode.Auto, author: null, downloadClientItem: null).Single();
+
+                Assert.That(manualResult.ImportDecision.Rejections.Single().Type, Is.EqualTo(RejectionType.Permanent));
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, recursive: true); } catch { }
+            }
+        }
+
+        [Test]
+        public void should_import_files_extracted_beside_the_archives_of_a_tracked_download()
+        {
+            var tempDir = Path.Combine(Path.GetTempPath(), "chaptarr-tests", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            var archive = Path.Combine(tempDir, "Book.zip");
+            var readme = Path.Combine(tempDir, "Readme.txt");
+            var extractedMedia = Path.Combine(tempDir, "Book.epub");
+            File.WriteAllBytes(archive, new byte[] { 1, 2, 3, 4 });
+            File.WriteAllBytes(readme, new byte[] { 1, 2, 3, 4 });
+            File.WriteAllBytes(extractedMedia, new byte[] { 1, 2, 3, 4 });
+
+            try
+            {
+                var tagsService = new StubMetadataTagService();
+                var matchingService = new StubFileMatchingService
+                {
+                    InitialResult = new FileMatchResult
+                    {
+                        MatchedFiles = Array.Empty<FileMatch>(),
+                        UnmatchedFiles = new[]
+                        {
+                            new UnmatchedFile
+                            {
+                                File = new DiscoveredFileWithMetadata { Path = extractedMedia, Size = 4, Modified = DateTime.UtcNow, AllTags = tagsService.Tags },
+                                Reason = "No local match",
+                                PotentialAuthors = Array.Empty<AuthorSuggestion>()
+                            }
+                        }
+                    }
+                };
+                var importApproved = new RecordingImportApprovedBooks();
+
+                var bookService = DispatchProxy.Create<IBookService, BookServiceProxy>();
+                ((BookServiceProxy)(object)bookService).Book = null;
+
+                var authorService = DispatchProxy.Create<IAuthorService, AuthorServiceProxy>();
+                ((AuthorServiceProxy)(object)authorService).Author = null;
+
+                var editionService = DispatchProxy.Create<IEditionService, EditionServiceProxy>();
+                ((EditionServiceProxy)(object)editionService).Edition = null;
+                ((EditionServiceProxy)(object)editionService).EditionsByBook = new List<Edition>();
+
+                var service = new DownloadedBooksImportService(
+                    new StubDiskProvider(),
+                    new StubDiskScanService(),
+                    matchingService,
+                    tagsService,
+                    importApproved,
+                    bookService,
+                    authorService,
+                    editionService,
+                    DispatchProxy.Create<IImportOrchestrator, ThrowingProxy<IImportOrchestrator>>(),
+                    new StubAuthorLibraryService { ResultAuthor = null },
+                    new StubRootFolderService(),
+                    ConfigServiceTestProxy.Create(),
+                    DispatchProxy.Create<IHistoryService, HistoryServiceProxy>(),
+                    DispatchProxy.Create<IEventAggregator, ThrowingProxy<IEventAggregator>>(),
+                    DispatchProxy.Create<NzbDrone.Common.EnvironmentInfo.IRuntimeInfo, ThrowingProxy<NzbDrone.Common.EnvironmentInfo.IRuntimeInfo>>(),
+                    DispatchProxy.Create<IMediaInfoExtractor, ThrowingProxy<IMediaInfoExtractor>>(),
+                    LogManager.GetCurrentClassLogger());
+
+                _ = service.ProcessPath(
+                    tempDir,
+                    ImportMode.Auto,
+                    author: null,
+                    downloadClientItem: new DownloadClientItem
+                    {
+                        DownloadId = "archive-grab",
+                        FilePaths = new List<string> { archive, readme },
+                        FileListConfidence = DownloadClientFileListConfidence.Authoritative
+                    });
+
+                Assert.That(matchingService.Calls, Has.Count.EqualTo(1));
+                Assert.That(matchingService.Calls[0].FileCount, Is.EqualTo(1));
+                Assert.That(importApproved.Decisions, Has.Count.EqualTo(1));
+                Assert.That(importApproved.Decisions[0].Item.Path, Is.EqualTo(extractedMedia));
             }
             finally
             {
