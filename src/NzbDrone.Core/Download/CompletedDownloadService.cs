@@ -32,6 +32,7 @@ namespace NzbDrone.Core.Download
 	        // Restore the pre-d60 three-cycle grace for files arriving through a remote
 	        // mount, but never keep a completed download retrying for missing files forever.
 	        private const int MissingAuthoritativeMediaFileBlockThreshold = 3;
+	        private const int ArchiveExtractionBlockThreshold = 30;
 	        private readonly IEventAggregator _eventAggregator;
 	        private readonly IHistoryService _historyService;
 	        private readonly IProvideImportItemService _provideImportItemService;
@@ -130,6 +131,7 @@ namespace NzbDrone.Core.Download
                 if (importResults.Any(result => result.Result == ImportResultType.Pending))
                 {
                     trackedDownload.MissingAuthoritativeMediaFileAttempts = 0;
+                    trackedDownload.ArchiveExtractionAttempts = 0;
                     trackedDownload.State = TrackedDownloadState.ImportPending;
                     trackedDownload.ClearStatus();
                     PublishTrackedDownloadUpdated(trackedDownload);
@@ -180,6 +182,35 @@ namespace NzbDrone.Core.Download
                 }
 
                 trackedDownload.MissingAuthoritativeMediaFileAttempts = 0;
+
+                if (AreAllImportRejectionsArchiveAwaitingExtraction(importResults))
+                {
+                    trackedDownload.ArchiveExtractionAttempts++;
+
+                    if (trackedDownload.ArchiveExtractionAttempts >= ArchiveExtractionBlockThreshold)
+                    {
+                        _logger.Warn("Archive(s) in {0} were not extracted after {1} checks; blocking automatic retries until user action.",
+                            trackedDownload.DownloadItem.Title,
+                            trackedDownload.ArchiveExtractionAttempts);
+
+                        BlockImport(trackedDownload,
+                            new TrackedDownloadStatusMessage(trackedDownload.DownloadItem.Title, "ARCHIVE_NOT_EXTRACTED"),
+                            new TrackedDownloadStatusMessage(trackedDownload.DownloadItem.Title, string.Format("Archive(s) in {0} were not extracted after {1} checks. Extract them into the download folder, then use Retry Import.", outputPath, trackedDownload.ArchiveExtractionAttempts)));
+                        return;
+                    }
+
+                    var statusMessages = importResults
+                        .Where(result => result.ImportDecision.Item != null)
+                        .Select(result => new TrackedDownloadStatusMessage(Path.GetFileName(result.ImportDecision.Item.Path), result.Errors))
+                        .ToArray();
+
+                    trackedDownload.Warn(statusMessages);
+                    trackedDownload.State = TrackedDownloadState.ImportPending;
+                    PublishTrackedDownloadUpdated(trackedDownload);
+                    return;
+                }
+
+                trackedDownload.ArchiveExtractionAttempts = 0;
 
                 if (AreAllImportRejectionsTemporary(importResults))
                 {
@@ -289,6 +320,16 @@ namespace NzbDrone.Core.Download
                 result.Result != ImportResultType.Imported &&
                 result.ImportDecision?.Rejections?.Any() == true &&
                 result.ImportDecision.Rejections.All(rejection => rejection.Type == RejectionType.Temporary));
+        }
+
+        private static bool AreAllImportRejectionsArchiveAwaitingExtraction(List<ImportResult> importResults)
+        {
+            return AreAllImportRejectionsTemporary(importResults) &&
+                   importResults.All(result => result.ImportDecision.Rejections.All(rejection =>
+                       string.Equals(
+                           rejection.Category,
+                           DownloadedBooksImportService.ArchiveAwaitingExtractionRejectionCategory,
+                           StringComparison.Ordinal)));
         }
 
         private static bool AreAllImportRejectionsMissingAuthoritativeMediaFiles(List<ImportResult> importResults)
