@@ -19,6 +19,7 @@ using NzbDrone.Core.ImportLists.Hardcover.Library;
 using NzbDrone.Core.Messaging.Commands;
 using NzbDrone.Core.Messaging.Events;
 using NzbDrone.Core.MetadataSource;
+using NzbDrone.Core.Parser;
 using NzbDrone.Core.Parser.Model;
 using NzbDrone.Core.Profiles.Metadata;
 using NzbDrone.Core.RootFolders;
@@ -1017,7 +1018,74 @@ namespace NzbDrone.Core.ImportLists
                 }
             }
 
+            matches = MatchBooksByTitle(authorBooks, report?.Book);
+
+            if (matches.Any())
+            {
+                var distinctWorks = matches
+                    .Select(b => BookEditionIdentity.GetCanonicalWorkProviderIds(b).FirstOrDefault() ?? $"book:{b.Id}")
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count();
+
+                if (distinctWorks == 1)
+                {
+                    _logger.Info("Import list '{0}': matched '{1}' by '{2}' through its title because work {3}, edition {4} and ISBN {5} are not known locally",
+                        importListName, report.Book, report.Author, bookProviderId, editionProviderId ?? "none", isbn13 ?? "none");
+                    return ExpandToSiblingWorkRows(authorBooks, matches);
+                }
+
+                _logger.Info("Import list '{0}': title '{1}' by '{2}' matches {3} different local works; not guessing without a matching identifier",
+                    importListName, report.Book, report.Author, distinctWorks);
+                matches = new List<Book>();
+            }
+
             return matches;
+        }
+
+        private static List<Book> MatchBooksByTitle(List<Book> authorBooks, string title)
+        {
+            var wanted = NormalizeListTitle(title);
+            if (wanted.IsNullOrWhiteSpace())
+            {
+                return new List<Book>();
+            }
+
+            var exact = authorBooks
+                .Where(b => string.Equals(NormalizeListTitle(b?.Title), wanted, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (exact.Any())
+            {
+                return exact;
+            }
+
+            return authorBooks
+                .Where(b => string.Equals(NormalizeListTitle(TitleBeforeSubtitle(b?.Title)), wanted, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        private static string TitleBeforeSubtitle(string title)
+        {
+            if (title.IsNullOrWhiteSpace())
+            {
+                return null;
+            }
+
+            var colon = title.IndexOf(':');
+
+            return colon > 0 ? title.Substring(0, colon) : null;
+        }
+
+        private static string NormalizeListTitle(string title)
+        {
+            if (title.IsNullOrWhiteSpace())
+            {
+                return null;
+            }
+
+            var normalized = title.CleanBookTitle().CleanAuthorName();
+
+            return normalized.IsNullOrWhiteSpace() ? null : normalized;
         }
 
         private static bool BookHasEdition(Book book, Func<Edition, bool> predicate)

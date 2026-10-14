@@ -991,7 +991,7 @@ namespace Chaptarr.Core.Test.ImportLists
         }
 
         [Test]
-        public void should_skip_the_item_when_no_shelf_identifier_matches_an_existing_author_book()
+        public void should_skip_the_item_when_neither_a_shelf_identifier_nor_the_title_matches_an_existing_author_book()
         {
             var definition = CreateSpecificBookGoodreadsDefinition(33);
             var author = new Author
@@ -1009,11 +1009,11 @@ namespace Chaptarr.Core.Test.ImportLists
                 AuthorId = author.Id,
                 Author = author,
                 MediaType = BookMediaType.Ebook,
-                Title = "Light Bringer",
-                GoodreadsWorkId = "gr:226986621",
+                Title = "Dark Age",
+                GoodreadsWorkId = "gr:250417810",
                 Editions = new List<Edition>
                 {
-                    new() { Id = 5, BookId = 204, ForeignEditionId = "gr:253886372-ebook", Isbn13 = "9781473646797" }
+                    new() { Id = 5, BookId = 204, ForeignEditionId = "gr:253871698-ebook", Isbn13 = "9781473646759" }
                 }
             };
             var commandQueue = new StubCommandQueueManager();
@@ -1042,6 +1042,154 @@ namespace Chaptarr.Core.Test.ImportLists
             Assert.Multiple(() =>
             {
                 Assert.That(ebookRow.EbookMonitored, Is.False);
+                Assert.That(commandQueue.Pushed.OfType<BookSearchCommand>(), Is.Empty);
+            });
+        }
+
+        [Test]
+        public void should_fall_back_to_the_title_when_it_identifies_a_single_local_work()
+        {
+            var definition = CreateSpecificBookGoodreadsDefinition(34);
+            var author = new Author
+            {
+                Id = 1,
+                Name = "Pierce Brown",
+                GoodreadsAuthorId = "gr:562254",
+                Monitored = false,
+                AudiobookMonitored = false,
+                EbookMonitored = false
+            };
+            var audiobookRow = new Book
+            {
+                Id = 205,
+                AuthorId = author.Id,
+                Author = author,
+                MediaType = BookMediaType.Audiobook,
+                Title = "Light Bringer",
+                GoodreadsWorkId = "gr:226986621",
+                HardcoverBookId = "hc:620124",
+                Editions = new List<Edition>
+                {
+                    new() { Id = 6, BookId = 205, ForeignEditionId = "gr:122275774-audiobook", Isbn13 = "9781664792791" }
+                }
+            };
+            var ebookRow = new Book
+            {
+                Id = 206,
+                AuthorId = author.Id,
+                Author = author,
+                MediaType = BookMediaType.Ebook,
+                Title = "Lightbringer",
+                GoodreadsWorkId = "gr:226986621",
+                HardcoverBookId = "hc:620124",
+                Editions = new List<Edition>
+                {
+                    new() { Id = 7, BookId = 206, ForeignEditionId = "gr:253886372-ebook", Isbn13 = "9781473646797" }
+                }
+            };
+            var collectionRow = new Book
+            {
+                Id = 207,
+                AuthorId = author.Id,
+                Author = author,
+                MediaType = BookMediaType.Ebook,
+                Title = "Red Rising 6 Paperback Books Collection: Light Bringer, Dark Age, Iron Gold, Morning Star, Golden Son, Red Rising",
+                GoodreadsWorkId = "gr:305165268"
+            };
+            var commandQueue = new StubCommandQueueManager();
+            var service = BuildExistingAuthorService(
+                definition,
+                author,
+                new List<Book> { audiobookRow, ebookRow, collectionRow },
+                new List<ImportListItemInfo>
+                {
+                    new()
+                    {
+                        ImportListId = definition.Id,
+                        ImportList = definition.Name,
+                        Author = author.Name,
+                        AuthorGoodreadsId = author.GoodreadsAuthorId,
+                        Book = "Light Bringer",
+                        BookGoodreadsId = "gr:49466217",
+                        EditionGoodreadsId = "gr:29227774",
+                        Isbn13 = "9781473646803"
+                    }
+                },
+                commandQueue);
+
+            service.Execute(new ImportListSyncCommand(definition.Id));
+
+            var bookSearch = commandQueue.Pushed.OfType<BookSearchCommand>().ToList();
+            Assert.Multiple(() =>
+            {
+                Assert.That(audiobookRow.AudiobookMonitored, Is.True);
+                Assert.That(ebookRow.EbookMonitored, Is.True);
+                Assert.That(collectionRow.EbookMonitored, Is.False, "a collection whose title merely contains the shelf title must not match");
+                Assert.That(bookSearch, Has.Count.EqualTo(1));
+                Assert.That(bookSearch.Single().BookIds, Is.EquivalentTo(new[] { 205, 206 }));
+            });
+        }
+
+        [Test]
+        public void should_not_guess_by_title_when_it_matches_more_than_one_local_work()
+        {
+            var definition = CreateSpecificBookGoodreadsDefinition(35);
+            var author = new Author
+            {
+                Id = 1,
+                Name = "Pierce Brown",
+                GoodreadsAuthorId = "gr:562254",
+                Monitored = false,
+                AudiobookMonitored = false,
+                EbookMonitored = false
+            };
+            var novel = new Book
+            {
+                Id = 208,
+                AuthorId = author.Id,
+                Author = author,
+                MediaType = BookMediaType.Ebook,
+                Title = "Red Rising",
+                GoodreadsWorkId = "gr:165789509",
+                HardcoverBookId = "hc:427473"
+            };
+            var comic = new Book
+            {
+                Id = 209,
+                AuthorId = author.Id,
+                Author = author,
+                MediaType = BookMediaType.Ebook,
+                Title = "Red Rising",
+                GoodreadsWorkId = "gr:51816410",
+                HardcoverBookId = "hc:908768"
+            };
+            var commandQueue = new StubCommandQueueManager();
+            var service = BuildExistingAuthorService(
+                definition,
+                author,
+                new List<Book> { novel, comic },
+                new List<ImportListItemInfo>
+                {
+                    new()
+                    {
+                        ImportListId = definition.Id,
+                        ImportList = definition.Name,
+                        Author = author.Name,
+                        AuthorGoodreadsId = author.GoodreadsAuthorId,
+                        Book = "Red Rising",
+                        BookGoodreadsId = "gr:99999991",
+                        EditionGoodreadsId = "gr:99999992",
+                        Isbn13 = "9780000000002"
+                    }
+                },
+                commandQueue);
+
+            service.Execute(new ImportListSyncCommand(definition.Id));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(novel.EbookMonitored, Is.False);
+                Assert.That(comic.EbookMonitored, Is.False);
                 Assert.That(commandQueue.Pushed.OfType<BookSearchCommand>(), Is.Empty);
             });
         }
