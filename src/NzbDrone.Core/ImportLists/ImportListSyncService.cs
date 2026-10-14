@@ -19,6 +19,7 @@ using NzbDrone.Core.ImportLists.Hardcover.Library;
 using NzbDrone.Core.Messaging.Commands;
 using NzbDrone.Core.Messaging.Events;
 using NzbDrone.Core.MetadataSource;
+using NzbDrone.Core.Parser;
 using NzbDrone.Core.Parser.Model;
 using NzbDrone.Core.Profiles.Metadata;
 using NzbDrone.Core.RootFolders;
@@ -967,6 +968,219 @@ namespace NzbDrone.Core.ImportLists
             return BookEditionIdentity.HasCanonicalWorkProviderId(book, providerId) ||
                    BookEditionIdentity.HasCanonicalEditionProviderId(book, providerId) ||
                    MatchesProviderId(book.ForeignEditionId, providerId, rawId);
+        }
+
+        private List<Book> FindListItemBooks(List<Book> authorBooks, ImportListItemInfo report, string bookProviderId, string importListName)
+        {
+            authorBooks ??= new List<Book>();
+
+            var (bookPrefix, bookRawId) = SplitProviderId(bookProviderId);
+            var matches = authorBooks
+                .Where(b => BookMatchesProviderId(b, bookPrefix, bookProviderId, bookRawId))
+                .ToList();
+
+            if (matches.Any())
+            {
+                return matches;
+            }
+
+            var editionProviderId = NormalizeProviderId(report?.EditionProviderId, "gr");
+            if (editionProviderId.IsNotNullOrWhiteSpace() &&
+                !editionProviderId.Equals(bookProviderId, StringComparison.OrdinalIgnoreCase))
+            {
+                var (editionPrefix, editionRawId) = SplitProviderId(editionProviderId);
+                matches = authorBooks
+                    .Where(b => BookMatchesProviderId(b, editionPrefix, editionProviderId, editionRawId) ||
+                                BookHasEdition(b, edition => MatchesEditionProviderId(edition, editionPrefix, editionProviderId, editionRawId)))
+                    .ToList();
+
+                if (matches.Any())
+                {
+                    _logger.Info("Import list '{0}': matched '{1}' by '{2}' through edition {3} because work {4} is not known locally",
+                        importListName, report.Book, report.Author, editionProviderId, bookProviderId);
+                    return ExpandToSiblingWorkRows(authorBooks, matches);
+                }
+            }
+
+            var isbn13 = NormalizeIsbn13(report?.Isbn13);
+            var asin = report?.Asin?.Trim();
+            if (isbn13.IsNotNullOrWhiteSpace() || asin.IsNotNullOrWhiteSpace())
+            {
+                matches = authorBooks
+                    .Where(b => BookHasIdentifier(b, isbn13, asin))
+                    .ToList();
+
+                if (matches.Any())
+                {
+                    _logger.Info("Import list '{0}': matched '{1}' by '{2}' through {3} because work {4} is not known locally",
+                        importListName, report.Book, report.Author, isbn13.IsNotNullOrWhiteSpace() ? "ISBN " + isbn13 : "ASIN " + asin, bookProviderId);
+                    return ExpandToSiblingWorkRows(authorBooks, matches);
+                }
+            }
+
+            matches = MatchBooksByTitle(authorBooks, report?.Book);
+
+            if (matches.Any())
+            {
+                var distinctWorks = matches
+                    .Select(b => BookEditionIdentity.GetCanonicalWorkProviderIds(b).FirstOrDefault() ?? $"book:{b.Id}")
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count();
+
+                if (distinctWorks == 1)
+                {
+                    _logger.Info("Import list '{0}': matched '{1}' by '{2}' through its title because work {3}, edition {4} and ISBN {5} are not known locally",
+                        importListName, report.Book, report.Author, bookProviderId, editionProviderId ?? "none", isbn13 ?? "none");
+                    return ExpandToSiblingWorkRows(authorBooks, matches);
+                }
+
+                _logger.Info("Import list '{0}': title '{1}' by '{2}' matches {3} different local works; not guessing without a matching identifier",
+                    importListName, report.Book, report.Author, distinctWorks);
+                matches = new List<Book>();
+            }
+
+            return matches;
+        }
+
+        private static List<Book> MatchBooksByTitle(List<Book> authorBooks, string title)
+        {
+            var wanted = NormalizeListTitle(title);
+            if (wanted.IsNullOrWhiteSpace())
+            {
+                return new List<Book>();
+            }
+
+            var exact = authorBooks
+                .Where(b => string.Equals(NormalizeListTitle(b?.Title), wanted, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (exact.Any())
+            {
+                return exact;
+            }
+
+            return authorBooks
+                .Where(b => string.Equals(NormalizeListTitle(TitleBeforeSubtitle(b?.Title)), wanted, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        private static string TitleBeforeSubtitle(string title)
+        {
+            if (title.IsNullOrWhiteSpace())
+            {
+                return null;
+            }
+
+            var colon = title.IndexOf(':');
+
+            return colon > 0 ? title.Substring(0, colon) : null;
+        }
+
+        private static string NormalizeListTitle(string title)
+        {
+            if (title.IsNullOrWhiteSpace())
+            {
+                return null;
+            }
+
+            var normalized = title.CleanBookTitle().CleanAuthorName();
+
+            return normalized.IsNullOrWhiteSpace() ? null : normalized;
+        }
+
+        private static bool BookHasEdition(Book book, Func<Edition, bool> predicate)
+        {
+            return book?.Editions?.Any(edition => edition != null && predicate(edition)) == true;
+        }
+
+        private static bool MatchesEditionProviderId(Edition edition, string prefix, string providerId, string rawId)
+        {
+            if (string.Equals(prefix, "gr", StringComparison.OrdinalIgnoreCase) &&
+                edition.GoodreadsEditionId.HasValue &&
+                edition.GoodreadsEditionId.Value > 0 &&
+                string.Equals(edition.GoodreadsEditionId.Value.ToString(), rawId, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            return MatchesProviderId(StripMediaTypeSuffix(edition.ForeignEditionId), providerId, rawId);
+        }
+
+        private static string StripMediaTypeSuffix(string foreignEditionId)
+        {
+            if (foreignEditionId.IsNullOrWhiteSpace())
+            {
+                return null;
+            }
+
+            var value = foreignEditionId.Trim();
+
+            foreach (var suffix in new[] { "-ebook", "-audiobook" })
+            {
+                if (value.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                {
+                    return value.Substring(0, value.Length - suffix.Length);
+                }
+            }
+
+            return value;
+        }
+
+        private static bool BookHasIdentifier(Book book, string isbn13, string asin)
+        {
+            if (book == null)
+            {
+                return false;
+            }
+
+            if (isbn13.IsNotNullOrWhiteSpace())
+            {
+                if (string.Equals(NormalizeIsbn13(book.ISBN13), isbn13, StringComparison.Ordinal) ||
+                    BookHasEdition(book, edition => string.Equals(NormalizeIsbn13(edition.Isbn13), isbn13, StringComparison.Ordinal)))
+                {
+                    return true;
+                }
+            }
+
+            if (asin.IsNotNullOrWhiteSpace())
+            {
+                if (string.Equals(book.ASIN?.Trim(), asin, StringComparison.OrdinalIgnoreCase) ||
+                    BookHasEdition(book, edition => string.Equals(edition.Asin?.Trim(), asin, StringComparison.OrdinalIgnoreCase) ||
+                                                    string.Equals(edition.AudibleASIN?.Trim(), asin, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string NormalizeIsbn13(string value)
+        {
+            if (value.IsNullOrWhiteSpace())
+            {
+                return null;
+            }
+
+            var digits = new string(value.Where(char.IsDigit).ToArray());
+
+            return digits.Length == 13 ? digits : null;
+        }
+
+        private static List<Book> ExpandToSiblingWorkRows(List<Book> authorBooks, List<Book> matches)
+        {
+            var workIds = new HashSet<string>(
+                matches.SelectMany(BookEditionIdentity.GetCanonicalWorkProviderIds),
+                StringComparer.OrdinalIgnoreCase);
+
+            if (workIds.Count == 0)
+            {
+                return matches;
+            }
+
+            return authorBooks
+                .Where(b => matches.Contains(b) || BookEditionIdentity.GetCanonicalWorkProviderIds(b).Any(workIds.Contains))
+                .ToList();
         }
 
         private static BookMediaType? GetMediaTypeForEdition(Edition edition)
@@ -2430,10 +2644,7 @@ namespace NzbDrone.Core.ImportLists
                                 continue;
                             }
 
-                            var (bookPrefix, bookRawId) = SplitProviderId(bookProviderId);
-                            var targetBooks = GetCachedBooksByAuthor(author.Id)
-                                .Where(b => BookMatchesProviderId(b, bookPrefix, bookProviderId, bookRawId))
-                                .ToList();
+                            var targetBooks = FindListItemBooks(GetCachedBooksByAuthor(author.Id), report, bookProviderId, importList.Name);
 
                             if (!targetBooks.Any())
                             {
