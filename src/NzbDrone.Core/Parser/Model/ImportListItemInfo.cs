@@ -15,6 +15,9 @@ namespace NzbDrone.Core.Parser.Model
         public string Asin { get; set; }
         public int? HardcoverReadingFormatId { get; set; }
         public DateTime ReleaseDate { get; set; }
+        public string Series { get; set; }
+        public string SeriesPosition { get; set; }
+        public DateTime? PublishedDate { get; set; }
 
         public string AuthorGoodreadsId
         {

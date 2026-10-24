@@ -2163,6 +2163,7 @@
   "Username": "Username",
   "UsernameHelpText": "Calibre content server username",
   "Version": "Version",
+  "ViewBook": "View Book",
   "ViewImportListItems": "View Books",
   "Wanted": "Wanted",
   "WatchLibraryForChangesHelpText": "Rescan automatically when files change in a root folder",

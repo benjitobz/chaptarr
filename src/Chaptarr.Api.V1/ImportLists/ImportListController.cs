@@ -106,6 +106,10 @@ namespace Chaptarr.Api.V1.ImportLists
                     return descending
                         ? items.OrderByDescending(i => i.State).ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase)
                         : items.OrderBy(i => i.State).ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase);
+                case "releasedate":
+                    return descending
+                        ? items.OrderByDescending(i => i.ReleaseDate ?? DateTime.MinValue).ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase)
+                        : items.OrderBy(i => i.ReleaseDate ?? DateTime.MinValue).ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase);
                 default:
                     return descending
                         ? items.OrderByDescending(i => i.DateAdded ?? DateTime.MinValue).ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase)

@@ -16,12 +16,21 @@ namespace NzbDrone.Core.ImportLists.Items
         public TrackedDownloadState? QueueState { get; set; }
     }
 
+    public class ImportListItemSeries
+    {
+        public string Title { get; set; }
+        public string Position { get; set; }
+    }
+
     public class ImportListItem
     {
         public string Title { get; set; }
         public string Subtitle { get; set; }
         public string Author { get; set; }
         public string TitleSlug { get; set; }
+        public string SeriesTitle { get; set; }
+        public string SeriesPosition { get; set; }
+        public DateTime? ReleaseDate { get; set; }
         public string AuthorProviderId { get; set; }
         public string BookProviderId { get; set; }
         public string EditionProviderId { get; set; }

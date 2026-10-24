@@ -356,7 +356,11 @@ namespace Chaptarr.Core.Test.ImportLists.Goodreads
     <review>
       <book>
         <id>456</id>
+        <title>Unread Book (Test Saga, #7)</title>
         <title_without_series>Unread Book</title_without_series>
+        <publication_year>2027</publication_year>
+        <publication_month></publication_month>
+        <publication_day></publication_day>
         <work><id>123</id></work>
         <authors><author><id>789</id><name>Test Author</name></author></authors>
       </book>
@@ -366,7 +370,11 @@ namespace Chaptarr.Core.Test.ImportLists.Goodreads
     <review>
       <book>
         <id>457</id>
+        <title>Read Book (Test Saga, #1-3; Other Series, #2)</title>
         <title_without_series>Read Book</title_without_series>
+        <publication_year>2018</publication_year>
+        <publication_month>3</publication_month>
+        <publication_day>14</publication_day>
         <work><id>124</id></work>
         <authors><author><id>789</id><name>Test Author</name></author></authors>
       </book>
@@ -401,10 +409,20 @@ namespace Chaptarr.Core.Test.ImportLists.Goodreads
             var items = importList.Fetch();
 
             Assert.That(items, Has.Count.EqualTo(2));
+
+            var unread = items.Single(i => i.Book == "Unread Book");
+            var read = items.Single(i => i.Book == "Read Book");
+
             Assert.Multiple(() =>
             {
-                Assert.That(items.Single(i => i.Book == "Unread Book").ReleaseDate, Is.EqualTo(new DateTime(2026, 10, 11, 17, 24, 36, DateTimeKind.Utc)));
-                Assert.That(items.Single(i => i.Book == "Read Book").ReleaseDate, Is.EqualTo(new DateTime(2026, 10, 1, 16, 30, 0, DateTimeKind.Utc)));
+                Assert.That(unread.ReleaseDate, Is.EqualTo(new DateTime(2026, 10, 11, 17, 24, 36, DateTimeKind.Utc)));
+                Assert.That(unread.Series, Is.EqualTo("Test Saga"));
+                Assert.That(unread.SeriesPosition, Is.EqualTo("7"));
+                Assert.That(unread.PublishedDate, Is.EqualTo(new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc)));
+                Assert.That(read.ReleaseDate, Is.EqualTo(new DateTime(2026, 10, 1, 16, 30, 0, DateTimeKind.Utc)));
+                Assert.That(read.Series, Is.EqualTo("Test Saga"));
+                Assert.That(read.SeriesPosition, Is.EqualTo("1-3"));
+                Assert.That(read.PublishedDate, Is.EqualTo(new DateTime(2018, 3, 14, 0, 0, 0, DateTimeKind.Utc)));
             });
         }
 
