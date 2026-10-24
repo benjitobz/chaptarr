@@ -227,8 +227,7 @@ class ImportListItemsModalContent extends Component {
       author,
       images,
       bookId,
-      seriesTitle,
-      seriesPosition,
+      series,
       releaseDate,
       dateAdded,
       bookProviderId,
@@ -248,9 +247,7 @@ class ImportListItemsModalContent extends Component {
       />
     );
 
-    const series = seriesTitle ?
-      `${seriesTitle}${seriesPosition ? ` #${seriesPosition}` : ''}` :
-      null;
+    const seriesList = (series || []).filter((entry) => entry && entry.title);
 
     return (
       <TableRow key={key}>
@@ -296,7 +293,13 @@ class ImportListItemsModalContent extends Component {
         </TableRowCell>
 
         <TableRowCell className={styles.seriesCell}>
-          {series}
+          {
+            seriesList.map((entry) => (
+              <div key={entry.title}>
+                {`${entry.title}${entry.position ? ` #${entry.position}` : ''}`}
+              </div>
+            ))
+          }
         </TableRowCell>
 
         <TableRowCell className={styles.statusCell}>

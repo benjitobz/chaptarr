@@ -28,8 +28,7 @@ namespace NzbDrone.Core.ImportLists.Items
         public string Subtitle { get; set; }
         public string Author { get; set; }
         public string TitleSlug { get; set; }
-        public string SeriesTitle { get; set; }
-        public string SeriesPosition { get; set; }
+        public List<ImportListItemSeries> Series { get; set; } = new();
         public DateTime? ReleaseDate { get; set; }
         public string AuthorProviderId { get; set; }
         public string BookProviderId { get; set; }
