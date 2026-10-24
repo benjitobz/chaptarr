@@ -8,7 +8,6 @@ interface CssExports {
   'dateCell': string;
   'empty': string;
   'leftHeader': string;
-  'seriesCell': string;
   'states': string;
   'statusCell': string;
   'subtitle': string;
