@@ -24,6 +24,9 @@ namespace Chaptarr.Api.V1.ImportLists
         public string Subtitle { get; set; }
         public string Author { get; set; }
         public string TitleSlug { get; set; }
+        public string SeriesTitle { get; set; }
+        public string SeriesPosition { get; set; }
+        public DateTime? ReleaseDate { get; set; }
         public int? AuthorId { get; set; }
         public int? BookId { get; set; }
         public ImportListItemState State { get; set; }
@@ -52,6 +55,9 @@ namespace Chaptarr.Api.V1.ImportLists
                 Subtitle = model.Subtitle,
                 Author = model.Author,
                 TitleSlug = model.TitleSlug,
+                SeriesTitle = model.SeriesTitle,
+                SeriesPosition = model.SeriesPosition,
+                ReleaseDate = model.ReleaseDate,
                 AuthorId = model.AuthorId,
                 BookId = model.BookId,
                 State = model.State,

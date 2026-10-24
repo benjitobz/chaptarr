@@ -10,6 +10,11 @@
   width: 60px;
 }
 
+.coverLink {
+  display: block;
+  width: 40px;
+}
+
 .cover {
   display: block;
   width: 40px;
@@ -36,6 +41,12 @@
 .author {
   color: var(--helpTextColor);
   font-size: 12px;
+}
+
+.seriesCell {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  text-align: left;
 }
 
 .statusCell {

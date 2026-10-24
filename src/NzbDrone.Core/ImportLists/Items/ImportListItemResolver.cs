@@ -74,6 +74,7 @@ namespace NzbDrone.Core.ImportLists.Items
                                            Func<int, bool> hasFiles,
                                            Func<int, bool> isQueued,
                                            Func<int, TrackedDownloadState?> queueState,
+                                           Func<int, ImportListItemSeries> series,
                                            PendingAuthorImport pendingAuthor,
                                            bool excluded)
         {
@@ -81,6 +82,9 @@ namespace NzbDrone.Core.ImportLists.Items
             {
                 Title = item?.Book,
                 Author = author?.Name ?? item?.Author,
+                SeriesTitle = item?.Series,
+                SeriesPosition = item?.SeriesPosition,
+                ReleaseDate = item?.PublishedDate,
                 AuthorProviderId = NormalizeProviderId(item?.AuthorProviderId),
                 BookProviderId = NormalizeProviderId(item?.BookProviderId),
                 EditionProviderId = NormalizeProviderId(item?.EditionProviderId),
@@ -120,6 +124,15 @@ namespace NzbDrone.Core.ImportLists.Items
                 result.Subtitle = primary.Subtitle;
                 result.Images = primary.Images?.Where(i => i != null).ToList() ?? new List<MediaCover.MediaCover>();
                 result.DateAdded ??= books.Min(b => b.Added);
+                result.ReleaseDate = books.Select(b => b.ReleaseDate).FirstOrDefault(d => d.HasValue) ?? result.ReleaseDate;
+
+                var librarySeries = books.Select(b => series?.Invoke(b.Id)).FirstOrDefault(s => s != null && s.Title.IsNotNullOrWhiteSpace());
+
+                if (librarySeries != null)
+                {
+                    result.SeriesTitle = librarySeries.Title;
+                    result.SeriesPosition = librarySeries.Position;
+                }
             }
 
             if (excluded)

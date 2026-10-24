@@ -31,6 +31,8 @@ namespace NzbDrone.Core.ImportLists.Items
         private readonly IQueueService _queueService;
         private readonly IPendingAuthorImportService _pendingAuthorImportService;
         private readonly IImportListExclusionService _importListExclusionService;
+        private readonly ISeriesBookLinkService _seriesBookLinkService;
+        private readonly ISeriesService _seriesService;
         private readonly ICached<List<ImportListItemInfo>> _cache;
         private readonly Logger _logger;
 
@@ -41,6 +43,8 @@ namespace NzbDrone.Core.ImportLists.Items
                                      IQueueService queueService,
                                      IPendingAuthorImportService pendingAuthorImportService,
                                      IImportListExclusionService importListExclusionService,
+                                     ISeriesBookLinkService seriesBookLinkService,
+                                     ISeriesService seriesService,
                                      ICacheManager cacheManager,
                                      Logger logger)
         {
@@ -51,6 +55,8 @@ namespace NzbDrone.Core.ImportLists.Items
             _queueService = queueService;
             _pendingAuthorImportService = pendingAuthorImportService;
             _importListExclusionService = importListExclusionService;
+            _seriesBookLinkService = seriesBookLinkService;
+            _seriesService = seriesService;
             _cache = cacheManager.GetCache<List<ImportListItemInfo>>(GetType());
             _logger = logger;
         }
@@ -164,12 +170,21 @@ namespace NzbDrone.Core.ImportLists.Items
                 return queueByBookId.TryGetValue(bookId, out var state) ? state : null;
             }
 
+            var matchedItems = items
+                .Select(item =>
+                {
+                    var author = FindAuthor(item.AuthorProviderId);
+                    var matched = author == null ? new List<Book>() : ImportListItemResolver.MatchBooks(BooksFor(author), item);
+
+                    return (Item: item, Author: author, Matched: matched);
+                })
+                .ToList();
+
+            var seriesLookup = BuildSeriesLookup(matchedItems.SelectMany(m => m.Matched).ToList(), matchedItems.Select(m => m.Author).Where(a => a != null).ToList());
             var result = new List<ImportListItem>();
 
-            foreach (var item in items)
+            foreach (var (item, author, matched) in matchedItems)
             {
-                var author = FindAuthor(item.AuthorProviderId);
-                var matched = author == null ? new List<Book>() : ImportListItemResolver.MatchBooks(BooksFor(author), item);
                 var authorProviderId = NormalizeProviderId(item.AuthorProviderId);
                 var bookProviderId = NormalizeProviderId(item.BookProviderId);
                 var excluded = exclusions.Any(exclusion => IsExcluded(exclusion, authorProviderId, bookProviderId, matched));
@@ -177,13 +192,79 @@ namespace NzbDrone.Core.ImportLists.Items
                     ? pendingImport
                     : null;
 
-                result.Add(ImportListItemResolver.Build(item, author, matched, HasFiles, IsQueued, QueueState, pending, excluded));
+                result.Add(ImportListItemResolver.Build(item, author, matched, HasFiles, IsQueued, QueueState, seriesLookup, pending, excluded));
             }
 
             return result
                 .OrderByDescending(i => i.DateAdded ?? DateTime.MinValue)
                 .ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+        }
+
+        private Func<int, ImportListItemSeries> BuildSeriesLookup(List<Book> books, List<Author> authors)
+        {
+            var bookIds = books.Select(b => b.Id).Distinct().ToList();
+
+            if (!bookIds.Any())
+            {
+                return _ => null;
+            }
+
+            var linksByBook = _seriesBookLinkService.GetLinksByBook(bookIds)
+                .Where(link => link != null)
+                .GroupBy(link => link.BookId)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(link => link.IsPrimary).ThenBy(link => link.SeriesPosition).ToList());
+
+            var seriesById = authors
+                .Select(a => a.Id)
+                .Distinct()
+                .SelectMany(authorId => _seriesService.GetByAuthorId(authorId) ?? new List<Series>())
+                .Where(s => s != null)
+                .GroupBy(s => s.Id)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            Series SeriesFor(int seriesId)
+            {
+                if (seriesById.TryGetValue(seriesId, out var cached))
+                {
+                    return cached;
+                }
+
+                Series found = null;
+
+                try
+                {
+                    found = _seriesService.GetSeries(seriesId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.Debug(ex, "Series {0} referenced by a book link could not be loaded", seriesId);
+                }
+
+                seriesById[seriesId] = found;
+
+                return found;
+            }
+
+            return bookId =>
+            {
+                if (!linksByBook.TryGetValue(bookId, out var links))
+                {
+                    return null;
+                }
+
+                foreach (var link in links)
+                {
+                    var series = SeriesFor(link.SeriesId);
+
+                    if (series != null && series.Title.IsNotNullOrWhiteSpace())
+                    {
+                        return new ImportListItemSeries { Title = series.Title, Position = link.Position };
+                    }
+                }
+
+                return null;
+            };
         }
 
         private static bool IsExcluded(ImportListExclusion exclusion, string authorProviderId, string bookProviderId, List<Book> matchedBooks)

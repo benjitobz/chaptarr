@@ -4,6 +4,7 @@ import BookCover from 'Book/BookCover';
 import Alert from 'Components/Alert';
 import Label from 'Components/Label';
 import Button from 'Components/Link/Button';
+import Link from 'Components/Link/Link';
 import LoadingIndicator from 'Components/Loading/LoadingIndicator';
 import ModalBody from 'Components/Modal/ModalBody';
 import ModalContent from 'Components/Modal/ModalContent';
@@ -225,27 +226,61 @@ class ImportListItemsModalContent extends Component {
       subtitle,
       author,
       images,
+      bookId,
+      seriesTitle,
+      seriesPosition,
+      releaseDate,
       dateAdded,
       bookProviderId,
       editionProviderId
     } = item;
 
     const key = `${bookProviderId || editionProviderId || title}-${index}`;
+    const bookLink = bookId ? `/book/${bookId}` : null;
+
+    const cover = (
+      <BookCover
+        className={styles.cover}
+        images={images || []}
+        size={70}
+        lazy={false}
+        overflow={true}
+      />
+    );
+
+    const series = seriesTitle ?
+      `${seriesTitle}${seriesPosition ? ` #${seriesPosition}` : ''}` :
+      null;
 
     return (
       <TableRow key={key}>
         <TableRowCell className={styles.coverCell}>
-          <BookCover
-            className={styles.cover}
-            images={images || []}
-            size={70}
-            lazy={false}
-            overflow={true}
-          />
+          {
+            bookLink ?
+              <Link
+                className={styles.coverLink}
+                to={bookLink}
+                title={translate('ViewBook')}
+              >
+                {cover}
+              </Link> :
+              cover
+          }
         </TableRowCell>
 
         <TableRowCell className={styles.titleCell}>
-          <div className={styles.title}>{title}</div>
+          <div className={styles.title}>
+            {
+              bookLink ?
+                <Link
+                  to={bookLink}
+                  title={translate('ViewBook')}
+                >
+                  {title}
+                </Link> :
+                title
+            }
+          </div>
 
           {
             subtitle ?
@@ -260,11 +295,21 @@ class ImportListItemsModalContent extends Component {
           }
         </TableRowCell>
 
+        <TableRowCell className={styles.seriesCell}>
+          {series}
+        </TableRowCell>
+
         <TableRowCell className={styles.statusCell}>
           <div className={styles.states}>
             {this.renderStates(item)}
           </div>
         </TableRowCell>
+
+        <RelativeDateCellConnector
+          className={styles.dateCell}
+          date={releaseDate}
+          timeForToday={false}
+        />
 
         <RelativeDateCellConnector
           className={styles.dateCell}
@@ -302,9 +347,23 @@ class ImportListItemsModalContent extends Component {
         isSortable: false
       },
       {
+        name: 'series',
+        className: styles.leftHeader,
+        label: translate('Series'),
+        isVisible: true,
+        isSortable: false
+      },
+      {
         name: 'status',
         className: styles.leftHeader,
         label: translate('Status'),
+        isVisible: true,
+        isSortable: false
+      },
+      {
+        name: 'releaseDate',
+        className: styles.leftHeader,
+        label: translate('ReleaseDate'),
         isVisible: true,
         isSortable: false
       },
