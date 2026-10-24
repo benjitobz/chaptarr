@@ -15,7 +15,7 @@ namespace Chaptarr.Core.Test.ImportLists
         private static readonly Func<int, bool> NoFiles = _ => false;
         private static readonly Func<int, bool> NotQueued = _ => false;
         private static readonly Func<int, TrackedDownloadState?> NoQueueState = _ => null;
-        private static readonly Func<int, ImportListItemSeries> NoSeries = _ => null;
+        private static readonly Func<int, List<ImportListItemSeries>> NoSeries = _ => null;
 
         private Author _author;
 
@@ -230,20 +230,69 @@ namespace Chaptarr.Core.Test.ImportLists
             item.SeriesPosition = "5";
             item.PublishedDate = new DateTime(2019, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-            var fromLibrary = ImportListItemResolver.Build(item, _author, new[] { book }, NoFiles, NotQueued, NoQueueState, id => id == 1 ? new ImportListItemSeries { Title = "Red Rising Saga", Position = "5" } : null, null, false);
+            var fromLibrary = ImportListItemResolver.Build(item, _author, new[] { book }, NoFiles, NotQueued, NoQueueState, id => id == 1 ? new List<ImportListItemSeries> { new() { Title = "Red Rising Saga", Position = "5" } } : null, null, false);
             var withoutLinks = ImportListItemResolver.Build(item, _author, new[] { book }, NoFiles, NotQueued, NoQueueState, NoSeries, null, false);
             var notInLibrary = ImportListItemResolver.Build(item, null, Array.Empty<Book>(), NoFiles, NotQueued, NoQueueState, NoSeries, null, false);
 
             Assert.Multiple(() =>
             {
-                Assert.That(fromLibrary.SeriesTitle, Is.EqualTo("Red Rising Saga"));
-                Assert.That(fromLibrary.SeriesPosition, Is.EqualTo("5"));
+                Assert.That(fromLibrary.Series.Single().Title, Is.EqualTo("Red Rising Saga"));
+                Assert.That(fromLibrary.Series.Single().Position, Is.EqualTo("5"));
                 Assert.That(fromLibrary.ReleaseDate, Is.EqualTo(book.ReleaseDate));
-                Assert.That(withoutLinks.SeriesTitle, Is.EqualTo("Red Rising Saga (feed)"));
+                Assert.That(withoutLinks.Series.Single().Title, Is.EqualTo("Red Rising Saga (feed)"));
                 Assert.That(withoutLinks.ReleaseDate, Is.EqualTo(book.ReleaseDate));
-                Assert.That(notInLibrary.SeriesTitle, Is.EqualTo("Red Rising Saga (feed)"));
-                Assert.That(notInLibrary.SeriesPosition, Is.EqualTo("5"));
+                Assert.That(notInLibrary.Series.Single().Title, Is.EqualTo("Red Rising Saga (feed)"));
+                Assert.That(notInLibrary.Series.Single().Position, Is.EqualTo("5"));
                 Assert.That(notInLibrary.ReleaseDate, Is.EqualTo(item.PublishedDate));
+            });
+        }
+
+        [Test]
+        public void build_series_list_should_clean_positions_and_drop_title_variants()
+        {
+            var seriesById = new Dictionary<int, Series>
+            {
+                [1] = new Series { Id = 1, Title = "Red Rising Saga", WorkCount = 7 },
+                [2] = new Series { Id = 2, Title = "Red Rising Saga Dramatic Adaptations", WorkCount = 6 }
+            };
+
+            var links = new List<SeriesBookLink>
+            {
+                new() { Id = 10, SeriesId = 1, BookId = 1, Position = "5", SeriesPosition = 5, IsPrimary = true },
+                new() { Id = 11, SeriesId = 2, BookId = 1, Position = "5, part 1", SeriesPosition = 0, IsPrimary = true }
+            };
+
+            var result = ImportListItemResolver.BuildSeriesList(links, id => seriesById.GetValueOrDefault(id));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result, Has.Count.EqualTo(1));
+                Assert.That(result.Single().Title, Is.EqualTo("Red Rising Saga"));
+                Assert.That(result.Single().Position, Is.EqualTo("5"));
+            });
+        }
+
+        [Test]
+        public void build_series_list_should_put_specific_series_before_umbrella_series()
+        {
+            var seriesById = new Dictionary<int, Series>
+            {
+                [137] = new Series { Id = 137, Title = "The Cosmere", WorkCount = 30 },
+                [143] = new Series { Id = 143, Title = "The Stormlight Archive", WorkCount = 10 }
+            };
+
+            var links = new List<SeriesBookLink>
+            {
+                new() { Id = 20, SeriesId = 137, BookId = 1, Position = "6", SeriesPosition = 6, IsPrimary = true },
+                new() { Id = 21, SeriesId = 143, BookId = 1, Position = "1, 1, Part 1, 1, Part 2", SeriesPosition = 0, IsPrimary = true }
+            };
+
+            var result = ImportListItemResolver.BuildSeriesList(links, id => seriesById.GetValueOrDefault(id));
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(result.Select(s => s.Title), Is.EqualTo(new[] { "The Stormlight Archive", "The Cosmere" }));
+                Assert.That(result.Select(s => s.Position), Is.EqualTo(new[] { "1", "6" }));
             });
         }
 

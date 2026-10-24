@@ -74,7 +74,7 @@ namespace NzbDrone.Core.ImportLists.Items
                                            Func<int, bool> hasFiles,
                                            Func<int, bool> isQueued,
                                            Func<int, TrackedDownloadState?> queueState,
-                                           Func<int, ImportListItemSeries> series,
+                                           Func<int, List<ImportListItemSeries>> series,
                                            PendingAuthorImport pendingAuthor,
                                            bool excluded)
         {
@@ -82,8 +82,6 @@ namespace NzbDrone.Core.ImportLists.Items
             {
                 Title = item?.Book,
                 Author = author?.Name ?? item?.Author,
-                SeriesTitle = item?.Series,
-                SeriesPosition = item?.SeriesPosition,
                 ReleaseDate = item?.PublishedDate,
                 AuthorProviderId = NormalizeProviderId(item?.AuthorProviderId),
                 BookProviderId = NormalizeProviderId(item?.BookProviderId),
@@ -92,6 +90,11 @@ namespace NzbDrone.Core.ImportLists.Items
                 AuthorId = author?.Id,
                 DateAdded = item != null && item.ReleaseDate > DateTime.MinValue ? item.ReleaseDate : null
             };
+
+            if (item?.Series.IsNotNullOrWhiteSpace() == true)
+            {
+                result.Series.Add(new ImportListItemSeries { Title = item.Series.Trim(), Position = CleanSeriesPosition(item.SeriesPosition) });
+            }
 
             var books = matchedBooks?.Where(b => b != null).OrderBy(b => b.MediaType).ToList() ?? new List<Book>();
 
@@ -126,12 +129,16 @@ namespace NzbDrone.Core.ImportLists.Items
                 result.DateAdded ??= books.Min(b => b.Added);
                 result.ReleaseDate = books.Select(b => b.ReleaseDate).FirstOrDefault(d => d.HasValue) ?? result.ReleaseDate;
 
-                var librarySeries = books.Select(b => series?.Invoke(b.Id)).FirstOrDefault(s => s != null && s.Title.IsNotNullOrWhiteSpace());
+                var librarySeries = books
+                    .SelectMany(b => series?.Invoke(b.Id) ?? new List<ImportListItemSeries>())
+                    .Where(s => s != null && s.Title.IsNotNullOrWhiteSpace())
+                    .GroupBy(s => s.Title, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => g.First())
+                    .ToList();
 
-                if (librarySeries != null)
+                if (librarySeries.Any())
                 {
-                    result.SeriesTitle = librarySeries.Title;
-                    result.SeriesPosition = librarySeries.Position;
+                    result.Series = librarySeries;
                 }
             }
 
@@ -154,6 +161,47 @@ namespace NzbDrone.Core.ImportLists.Items
             }
 
             return result;
+        }
+
+        public static List<ImportListItemSeries> BuildSeriesList(IEnumerable<SeriesBookLink> links, Func<int, Series> seriesById)
+        {
+            var candidates = (links ?? Enumerable.Empty<SeriesBookLink>())
+                .Where(link => link != null)
+                .Select(link => (Link: link, Series: seriesById?.Invoke(link.SeriesId)))
+                .Where(c => c.Series != null && c.Series.Title.IsNotNullOrWhiteSpace())
+                .OrderBy(c => c.Series.WorkCount > 0 ? c.Series.WorkCount : int.MaxValue)
+                .ThenBy(c => c.Link.Id)
+                .ToList();
+
+            var selected = new List<ImportListItemSeries>();
+
+            foreach (var candidate in candidates)
+            {
+                var title = candidate.Series.Title.Trim();
+
+                if (selected.Any(s => s.Title.Equals(title, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                selected.Add(new ImportListItemSeries { Title = title, Position = CleanSeriesPosition(candidate.Link.Position) });
+            }
+
+            return selected
+                .Where(s => !selected.Any(other => other.Title.Length < s.Title.Length && s.Title.StartsWith(other.Title, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+        }
+
+        private static string CleanSeriesPosition(string position)
+        {
+            if (position.IsNullOrWhiteSpace())
+            {
+                return null;
+            }
+
+            var first = position.Split(',')[0].Trim();
+
+            return first.Any(char.IsDigit) ? first : position.Trim();
         }
 
         private static List<Book> MatchByTitle(List<Book> books, string title)

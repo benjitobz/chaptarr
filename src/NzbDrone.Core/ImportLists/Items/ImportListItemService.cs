@@ -201,19 +201,19 @@ namespace NzbDrone.Core.ImportLists.Items
                 .ToList();
         }
 
-        private Func<int, ImportListItemSeries> BuildSeriesLookup(List<Book> books, List<Author> authors)
+        private Func<int, List<ImportListItemSeries>> BuildSeriesLookup(List<Book> books, List<Author> authors)
         {
             var bookIds = books.Select(b => b.Id).Distinct().ToList();
 
             if (!bookIds.Any())
             {
-                return _ => null;
+                return _ => new List<ImportListItemSeries>();
             }
 
             var linksByBook = _seriesBookLinkService.GetLinksByBook(bookIds)
                 .Where(link => link != null)
                 .GroupBy(link => link.BookId)
-                .ToDictionary(g => g.Key, g => g.OrderByDescending(link => link.IsPrimary).ThenBy(link => link.SeriesPosition).ToList());
+                .ToDictionary(g => g.Key, g => g.ToList());
 
             var seriesById = authors
                 .Select(a => a.Id)
@@ -246,25 +246,9 @@ namespace NzbDrone.Core.ImportLists.Items
                 return found;
             }
 
-            return bookId =>
-            {
-                if (!linksByBook.TryGetValue(bookId, out var links))
-                {
-                    return null;
-                }
-
-                foreach (var link in links)
-                {
-                    var series = SeriesFor(link.SeriesId);
-
-                    if (series != null && series.Title.IsNotNullOrWhiteSpace())
-                    {
-                        return new ImportListItemSeries { Title = series.Title, Position = link.Position };
-                    }
-                }
-
-                return null;
-            };
+            return bookId => linksByBook.TryGetValue(bookId, out var links)
+                ? ImportListItemResolver.BuildSeriesList(links, SeriesFor)
+                : new List<ImportListItemSeries>();
         }
 
         private static bool IsExcluded(ImportListExclusion exclusion, string authorProviderId, string bookProviderId, List<Book> matchedBooks)
