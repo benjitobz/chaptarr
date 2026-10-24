@@ -341,6 +341,74 @@ namespace Chaptarr.Core.Test.ImportLists.Goodreads
         }
 
         [Test]
+        public void should_parse_goodreads_review_dates_and_prefer_date_added()
+        {
+            const string shelfListXml = @"<?xml version=""1.0"" encoding=""UTF-8""?>
+<GoodreadsResponse>
+  <shelves>
+    <user_shelf><name>to-read</name></user_shelf>
+  </shelves>
+</GoodreadsResponse>";
+
+            const string reviewListXml = @"<?xml version=""1.0"" encoding=""UTF-8""?>
+<GoodreadsResponse>
+  <reviews start=""1"" end=""2"" total=""2"">
+    <review>
+      <book>
+        <id>456</id>
+        <title_without_series>Unread Book</title_without_series>
+        <work><id>123</id></work>
+        <authors><author><id>789</id><name>Test Author</name></author></authors>
+      </book>
+      <read_at></read_at>
+      <date_added>Sun Oct 11 10:24:36 -0700 2026</date_added>
+    </review>
+    <review>
+      <book>
+        <id>457</id>
+        <title_without_series>Read Book</title_without_series>
+        <work><id>124</id></work>
+        <authors><author><id>789</id><name>Test Author</name></author></authors>
+      </book>
+      <read_at>Tue Oct 20 08:00:00 -0700 2026</read_at>
+      <date_added>Thu Oct 01 09:30:00 -0700 2026</date_added>
+    </review>
+  </reviews>
+</GoodreadsResponse>";
+
+            var httpClient = new StubHttpClient(shelfListXml: shelfListXml, reviewListPage1Xml: reviewListXml);
+            var settings = new GoodreadsBookshelfImportListSettings
+            {
+                UserId = "https://www.goodreads.com/user/show/12345678-test-user",
+                BookshelfIds = new[] { "to-read" }
+            };
+
+            var importList = new GoodreadsBookshelf(
+                importListStatusService: new StubImportListStatusService(),
+                configService: null,
+                parsingService: null,
+                httpClient: httpClient,
+                qualityProfileService: new Lazy<IQualityProfileService>(() => new StubQualityProfileService()),
+                metadataProfileService: new Lazy<IMetadataProfileService>(() => new StubMetadataProfileService()),
+                tagService: new Lazy<ITagService>(() => new StubTagService()),
+                rootFolderService: new StubRootFolderService(),
+                rootFolderSettingsResolver: new StubRootFolderSettingsResolver(),
+                logger: LogManager.GetCurrentClassLogger())
+            {
+                Definition = new ImportListDefinition { Id = 1, Name = "Goodreads Bookshelves", Settings = settings }
+            };
+
+            var items = importList.Fetch();
+
+            Assert.That(items, Has.Count.EqualTo(2));
+            Assert.Multiple(() =>
+            {
+                Assert.That(items.Single(i => i.Book == "Unread Book").ReleaseDate, Is.EqualTo(new DateTime(2026, 10, 11, 17, 24, 36, DateTimeKind.Utc)));
+                Assert.That(items.Single(i => i.Book == "Read Book").ReleaseDate, Is.EqualTo(new DateTime(2026, 10, 1, 16, 30, 0, DateTimeKind.Utc)));
+            });
+        }
+
+        [Test]
         public void should_continue_review_list_pagination_by_counting_reviews_not_end_attribute()
         {
             const string shelfListXml = @"<?xml version=""1.0"" encoding=""UTF-8""?>
