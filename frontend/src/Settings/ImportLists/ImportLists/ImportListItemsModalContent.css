@@ -43,6 +43,11 @@
   font-size: 12px;
 }
 
+.mediaLinks {
+  margin-top: 2px;
+  font-size: 12px;
+}
+
 .statusCell {
   composes: cell from '~Components/Table/Cells/TableRowCell.css';
 

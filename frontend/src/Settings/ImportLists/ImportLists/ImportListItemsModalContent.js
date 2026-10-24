@@ -235,6 +235,7 @@ class ImportListItemsModalContent extends Component {
 
     const key = `${bookProviderId || editionProviderId || title}-${index}`;
     const bookLink = bookId ? `/book/${bookId}` : null;
+    const mediaLinks = (item.media || []).filter((entry) => entry && entry.bookId);
 
     const cover = (
       <BookCover
@@ -285,6 +286,23 @@ class ImportListItemsModalContent extends Component {
           {
             author ?
               <div className={styles.author}>{author}</div> :
+              null
+          }
+
+          {
+            mediaLinks.length ?
+              <div className={styles.mediaLinks}>
+                {
+                  mediaLinks.map((entry, linkIndex) => (
+                    <span key={entry.bookId}>
+                      {linkIndex > 0 ? ' · ' : null}
+                      <Link to={`/book/${entry.bookId}`}>
+                        {mediaTypeLabel(entry.mediaType)}
+                      </Link>
+                    </span>
+                  ))
+                }
+              </div> :
               null
           }
         </TableRowCell>
