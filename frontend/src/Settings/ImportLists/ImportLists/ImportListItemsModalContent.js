@@ -227,7 +227,6 @@ class ImportListItemsModalContent extends Component {
       author,
       images,
       bookId,
-      series,
       releaseDate,
       dateAdded,
       bookProviderId,
@@ -246,8 +245,6 @@ class ImportListItemsModalContent extends Component {
         overflow={true}
       />
     );
-
-    const seriesList = (series || []).filter((entry) => entry && entry.title);
 
     return (
       <TableRow key={key}>
@@ -289,16 +286,6 @@ class ImportListItemsModalContent extends Component {
             author ?
               <div className={styles.author}>{author}</div> :
               null
-          }
-        </TableRowCell>
-
-        <TableRowCell className={styles.seriesCell}>
-          {
-            seriesList.map((entry) => (
-              <div key={entry.title}>
-                {`${entry.title}${entry.position ? ` #${entry.position}` : ''}`}
-              </div>
-            ))
           }
         </TableRowCell>
 
@@ -346,13 +333,6 @@ class ImportListItemsModalContent extends Component {
       {
         name: 'title',
         label: translate('Title'),
-        isVisible: true,
-        isSortable: false
-      },
-      {
-        name: 'series',
-        className: styles.leftHeader,
-        label: translate('Series'),
         isVisible: true,
         isSortable: false
       },

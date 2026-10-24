@@ -43,12 +43,6 @@
   font-size: 12px;
 }
 
-.seriesCell {
-  composes: cell from '~Components/Table/Cells/TableRowCell.css';
-
-  text-align: left;
-}
-
 .statusCell {
   composes: cell from '~Components/Table/Cells/TableRowCell.css';
 
