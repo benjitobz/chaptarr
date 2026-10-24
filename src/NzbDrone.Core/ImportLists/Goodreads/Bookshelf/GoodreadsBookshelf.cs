@@ -750,7 +750,7 @@ namespace NzbDrone.Core.ImportLists.Goodreads
                 var authorName = author?.Element("name")?.Value.CleanSpaces();
                 var isbn13 = book.Element("isbn13")?.Value?.Trim();
                 var asin = FirstNonBlank(book.Element("kindle_asin")?.Value, book.Element("asin")?.Value)?.Trim();
-                var releaseDate = ParseRssPubDate(FirstNonBlank(review.Element("read_at")?.Value, review.Element("date_added")?.Value));
+                var releaseDate = ParseReviewDate(review, "date_added") ?? ParseReviewDate(review, "read_at") ?? default;
 
                 if (editionId.IsNullOrWhiteSpace() && workId.IsNullOrWhiteSpace() && title.IsNullOrWhiteSpace() && authorName.IsNullOrWhiteSpace())
                 {
@@ -923,6 +923,20 @@ namespace NzbDrone.Core.ImportLists.Goodreads
             }
 
             return channelTitle.Substring(colonIndex + 1).Trim();
+        }
+
+        private static DateTime? ParseReviewDate(XElement review, string elementName)
+        {
+            var parsed = review.ElementAsDateTime(elementName);
+
+            if (parsed.HasValue)
+            {
+                return parsed;
+            }
+
+            var fallback = ParseRssPubDate(review.Element(elementName)?.Value);
+
+            return fallback == default ? null : fallback;
         }
 
         private static DateTime ParseRssPubDate(string pubDate)
