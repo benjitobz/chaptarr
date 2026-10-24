@@ -4,10 +4,18 @@
   width: 290px;
 }
 
+.nameContainer {
+  display: flex;
+  justify-content: space-between;
+}
+
 .name {
   @add-mixin truncate;
 
+  flex: 1 1 auto;
+
   margin-bottom: 4px;
+  min-width: 0;
   font-weight: 300;
   font-size: 24px;
 }
@@ -35,6 +43,13 @@
 
 .hardcoverUsername {
   @add-mixin truncate;
+}
+
+.viewButton {
+  composes: button from '~Components/Link/IconButton.css';
+
+  flex: 0 0 auto;
+  height: 36px;
 }
 
 .enabled {
