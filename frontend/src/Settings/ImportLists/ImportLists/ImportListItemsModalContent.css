@@ -1,0 +1,64 @@
+.leftHeader {
+  composes: headerCell from '~Components/Table/TableHeaderCell.css';
+
+  text-align: left;
+}
+
+.coverCell {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  width: 60px;
+}
+
+.cover {
+  display: block;
+  width: 40px;
+  height: 60px;
+  border-radius: 2px;
+  object-fit: cover;
+}
+
+.titleCell {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  text-align: left;
+}
+
+.title {
+  font-weight: 500;
+}
+
+.subtitle {
+  color: var(--helpTextColor);
+  font-size: 13px;
+}
+
+.author {
+  color: var(--helpTextColor);
+  font-size: 12px;
+}
+
+.statusCell {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  text-align: left;
+}
+
+.states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.dateCell {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  text-align: left;
+  white-space: nowrap;
+}
+
+.empty {
+  padding: 20px 0;
+  color: var(--helpTextColor);
+  text-align: center;
+}

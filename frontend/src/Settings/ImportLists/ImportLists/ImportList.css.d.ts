@@ -7,7 +7,9 @@ interface CssExports {
   'hardcoverUsername': string;
   'list': string;
   'name': string;
+  'nameContainer': string;
   'nameWithHardcoverAccount': string;
+  'viewButton': string;
 }
 export const cssExports: CssExports;
 export default cssExports;

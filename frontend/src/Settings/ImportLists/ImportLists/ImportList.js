@@ -2,13 +2,15 @@ import PropTypes from 'prop-types';
 import React, { Component } from 'react';
 import Card from 'Components/Card';
 import Label from 'Components/Label';
+import IconButton from 'Components/Link/IconButton';
 import MediaTypeScope from 'Components/MediaTypeScope';
 import ConfirmModal from 'Components/Modal/ConfirmModal';
-import { kinds } from 'Helpers/Props';
+import { icons, kinds } from 'Helpers/Props';
 import { getImportListMediaTypeScope } from 'Helpers/Props/mediaTypeScopes';
 import formatShortTimeSpan from 'Utilities/Date/formatShortTimeSpan';
 import translate from 'Utilities/String/translate';
 import EditImportListModalConnector from './EditImportListModalConnector';
+import ImportListItemsModal from './ImportListItemsModal';
 import styles from './ImportList.css';
 
 class ImportList extends Component {
@@ -21,7 +23,8 @@ class ImportList extends Component {
 
     this.state = {
       isEditImportListModalOpen: false,
-      isDeleteImportListModalOpen: false
+      isDeleteImportListModalOpen: false,
+      isItemsModalOpen: false
     };
   }
 
@@ -51,6 +54,14 @@ class ImportList extends Component {
     this.props.onConfirmDeleteImportList(this.props.id);
   };
 
+  onViewItemsPress = () => {
+    this.setState({ isItemsModalOpen: true });
+  };
+
+  onItemsModalClose = () => {
+    this.setState({ isItemsModalOpen: false });
+  };
+
   //
   // Render
 
@@ -76,8 +87,17 @@ class ImportList extends Component {
         overlayContent={true}
         onPress={this.onEditImportListPress}
       >
-        <div className={showHardcoverAccount ? styles.nameWithHardcoverAccount : styles.name}>
-          {name}
+        <div className={styles.nameContainer}>
+          <div className={showHardcoverAccount ? styles.nameWithHardcoverAccount : styles.name}>
+            {name}
+          </div>
+
+          <IconButton
+            className={styles.viewButton}
+            title={translate('ViewImportListItems')}
+            name={icons.VIEW}
+            onPress={this.onViewItemsPress}
+          />
         </div>
 
         <MediaTypeScope mediaType={mediaTypeScope} />
@@ -128,6 +148,13 @@ class ImportList extends Component {
           isOpen={this.state.isEditImportListModalOpen}
           onModalClose={this.onEditImportListModalClose}
           onDeleteImportListPress={this.onDeleteImportListPress}
+        />
+
+        <ImportListItemsModal
+          id={id}
+          name={name}
+          isOpen={this.state.isItemsModalOpen}
+          onModalClose={this.onItemsModalClose}
         />
 
         <ConfirmModal
