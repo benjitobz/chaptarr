@@ -54,13 +54,24 @@ namespace Chaptarr.Api.V1.ImportLists
         [Produces("application/json")]
         public PagingResource<ImportListItemResource> GetItems([FromRoute] int id, [FromQuery] PagingRequestResource paging, [FromQuery] bool refresh = false)
         {
+            return Page(_importListItemService.GetItems(id, refresh), paging);
+        }
+
+        [HttpGet("items")]
+        [Produces("application/json")]
+        public PagingResource<ImportListItemResource> GetAllItems([FromQuery] PagingRequestResource paging, [FromQuery] bool refresh = false)
+        {
+            return Page(_importListItemService.GetAllItems(refresh), paging);
+        }
+
+        private PagingResource<ImportListItemResource> Page(List<ImportListItem> items, PagingRequestResource paging)
+        {
             var pagingResource = new PagingResource<ImportListItemResource>(paging);
             var page = Math.Max(pagingResource.Page, 1);
             var pageSize = Math.Clamp(pagingResource.PageSize, 1, MaxItemsPageSize);
             var sortKey = string.IsNullOrWhiteSpace(pagingResource.SortKey) ? "dateAdded" : pagingResource.SortKey;
             var sortDirection = pagingResource.SortDirection == SortDirection.Ascending ? SortDirection.Ascending : SortDirection.Descending;
 
-            var items = _importListItemService.GetItems(id, refresh);
             var ordered = Sort(items, sortKey, sortDirection);
 
             var records = ordered

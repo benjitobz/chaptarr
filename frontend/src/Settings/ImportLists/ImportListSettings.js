@@ -8,6 +8,7 @@ import { icons } from 'Helpers/Props';
 import SettingsToolbarConnector from 'Settings/SettingsToolbarConnector';
 import translate from 'Utilities/String/translate';
 import ImportListsExclusionsConnector from './ImportListExclusions/ImportListExclusionsConnector';
+import ImportListItemsModal from './ImportLists/ImportListItemsModal';
 import ImportListsConnector from './ImportLists/ImportListsConnector';
 import ManageImportListsModal from './ImportLists/Manage/ManageImportListsModal';
 
@@ -21,7 +22,8 @@ class ImportListSettings extends Component {
 
     this.state = {
       hasPendingChanges: false,
-      isManageImportListsOpen: false
+      isManageImportListsOpen: false,
+      isAllItemsOpen: false
     };
   }
 
@@ -38,6 +40,14 @@ class ImportListSettings extends Component {
 
   onManageImportListsModalClose = () => {
     this.setState({ isManageImportListsOpen: false });
+  };
+
+  onAllItemsPress = () => {
+    this.setState({ isAllItemsOpen: true });
+  };
+
+  onAllItemsModalClose = () => {
+    this.setState({ isAllItemsOpen: false });
   };
 
   onHasPendingChange = (hasPendingChanges) => {
@@ -62,7 +72,8 @@ class ImportListSettings extends Component {
     const {
       isSaving,
       hasPendingChanges,
-      isManageImportListsOpen
+      isManageImportListsOpen,
+      isAllItemsOpen
     } = this.state;
 
     return (
@@ -86,6 +97,12 @@ class ImportListSettings extends Component {
                 iconName={icons.MANAGE}
                 onPress={this.onManageImportListsPress}
               />
+
+              <PageToolbarButton
+                label={translate('ViewAllImportListItems')}
+                iconName={icons.VIEW}
+                onPress={this.onAllItemsPress}
+              />
             </Fragment>
           }
           onSavePress={this.onSavePress}
@@ -97,6 +114,10 @@ class ImportListSettings extends Component {
           <ManageImportListsModal
             isOpen={isManageImportListsOpen}
             onModalClose={this.onManageImportListsModalClose}
+          />
+          <ImportListItemsModal
+            isOpen={isAllItemsOpen}
+            onModalClose={this.onAllItemsModalClose}
           />
         </PageContentBody>
       </PageContent>

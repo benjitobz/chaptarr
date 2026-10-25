@@ -16,6 +16,14 @@ namespace NzbDrone.Core.ImportLists.Items
         public TrackedDownloadState? QueueState { get; set; }
     }
 
+    public class ImportListItemSource
+    {
+        public int ImportListId { get; set; }
+        public string Name { get; set; }
+        public string Implementation { get; set; }
+        public string ImplementationName { get; set; }
+    }
+
     public class ImportListItemSeries
     {
         public string Title { get; set; }
@@ -41,5 +49,6 @@ namespace NzbDrone.Core.ImportLists.Items
         public string PendingError { get; set; }
         public List<MediaCover.MediaCover> Images { get; set; } = new();
         public List<ImportListItemMediaState> Media { get; set; } = new();
+        public List<ImportListItemSource> Sources { get; set; } = new();
     }
 }
