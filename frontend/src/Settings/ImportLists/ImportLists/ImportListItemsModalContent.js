@@ -112,8 +112,10 @@ class ImportListItemsModalContent extends Component {
 
     this.setState({ isFetching: true, error: null });
 
+    const { id } = this.props;
+
     const ajaxRequest = createAjaxRequest({
-      url: `/importlist/${this.props.id}/items`,
+      url: id ? `/importlist/${id}/items` : '/importlist/items',
       dataType: 'json',
       data: {
         page,
@@ -307,6 +309,28 @@ class ImportListItemsModalContent extends Component {
           }
         </TableRowCell>
 
+        {
+          this.props.id ?
+            null :
+            <TableRowCell className={styles.sourcesCell}>
+              {
+                (item.sources || []).map((source) => (
+                  <div
+                    key={source.importListId}
+                    className={styles.source}
+                  >
+                    <span className={styles.sourceName}>{source.name}</span>
+                    {
+                      source.implementationName ?
+                        <span className={styles.sourceType}>{source.implementationName}</span> :
+                        null
+                    }
+                  </div>
+                ))
+              }
+            </TableRowCell>
+        }
+
         <TableRowCell className={styles.statusCell}>
           <div className={styles.states}>
             {this.renderStates(item)}
@@ -329,6 +353,7 @@ class ImportListItemsModalContent extends Component {
 
   render() {
     const {
+      id,
       name,
       onModalClose
     } = this.props;
@@ -352,6 +377,13 @@ class ImportListItemsModalContent extends Component {
         name: 'title',
         label: translate('Title'),
         isVisible: true,
+        isSortable: false
+      },
+      {
+        name: 'sources',
+        className: styles.leftHeader,
+        label: translate('ImportLists'),
+        isVisible: !id,
         isSortable: false
       },
       {
@@ -383,7 +415,7 @@ class ImportListItemsModalContent extends Component {
     return (
       <ModalContent onModalClose={onModalClose}>
         <ModalHeader>
-          {translate('ImportListItemsHeader', { name })}
+          {id ? translate('ImportListItemsHeader', { name }) : translate('AllImportListItemsHeader')}
         </ModalHeader>
 
         <ModalBody>
@@ -452,8 +484,8 @@ class ImportListItemsModalContent extends Component {
 }
 
 ImportListItemsModalContent.propTypes = {
-  id: PropTypes.number.isRequired,
-  name: PropTypes.string.isRequired,
+  id: PropTypes.number,
+  name: PropTypes.string,
   onModalClose: PropTypes.func.isRequired
 };
 

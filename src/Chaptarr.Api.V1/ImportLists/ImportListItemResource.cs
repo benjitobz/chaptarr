@@ -24,6 +24,14 @@ namespace Chaptarr.Api.V1.ImportLists
         public string Position { get; set; }
     }
 
+    public class ImportListItemSourceResource
+    {
+        public int ImportListId { get; set; }
+        public string Name { get; set; }
+        public string Implementation { get; set; }
+        public string ImplementationName { get; set; }
+    }
+
     public class ImportListItemResource
     {
         public string Title { get; set; }
@@ -43,6 +51,7 @@ namespace Chaptarr.Api.V1.ImportLists
         public string Isbn13 { get; set; }
         public List<MediaCover> Images { get; set; }
         public List<ImportListItemMediaResource> Media { get; set; }
+        public List<ImportListItemSourceResource> Sources { get; set; }
     }
 
     public static class ImportListItemResourceMapper
@@ -80,7 +89,14 @@ namespace Chaptarr.Api.V1.ImportLists
                     HasFiles = media.HasFiles,
                     State = media.State,
                     QueueState = media.QueueState
-                }).ToList() ?? new List<ImportListItemMediaResource>()
+                }).ToList() ?? new List<ImportListItemMediaResource>(),
+                Sources = model.Sources?.Select(source => new ImportListItemSourceResource
+                {
+                    ImportListId = source.ImportListId,
+                    Name = source.Name,
+                    Implementation = source.Implementation,
+                    ImplementationName = source.ImplementationName
+                }).ToList() ?? new List<ImportListItemSourceResource>()
             };
         }
     }

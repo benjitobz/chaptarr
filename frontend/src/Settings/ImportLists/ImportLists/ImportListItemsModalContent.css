@@ -48,6 +48,25 @@
   font-size: 12px;
 }
 
+.sourcesCell {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  text-align: left;
+}
+
+.source {
+  white-space: nowrap;
+}
+
+.sourceName {
+  margin-right: 6px;
+}
+
+.sourceType {
+  color: var(--helpTextColor);
+  font-size: 12px;
+}
+
 .statusCell {
   composes: cell from '~Components/Table/Cells/TableRowCell.css';
 

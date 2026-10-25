@@ -18,6 +18,7 @@ namespace NzbDrone.Core.ImportLists.Items
     public interface IImportListItemService
     {
         List<ImportListItem> GetItems(int importListId, bool refresh);
+        List<ImportListItem> GetAllItems(bool refresh);
     }
 
     public class ImportListItemService : IImportListItemService
@@ -64,16 +65,101 @@ namespace NzbDrone.Core.ImportLists.Items
         public List<ImportListItem> GetItems(int importListId, bool refresh)
         {
             var definition = _importListFactory.Get(importListId);
-            var cacheKey = importListId.ToString(CultureInfo.InvariantCulture);
+            var source = CreateSource(definition);
+
+            return Resolve(FetchCached(definition, refresh).Select(item => (item, source)).ToList());
+        }
+
+        public List<ImportListItem> GetAllItems(bool refresh)
+        {
+            var tagged = new List<(ImportListItemInfo Item, ImportListItemSource Source)>();
+
+            foreach (var definition in _importListFactory.All())
+            {
+                var source = CreateSource(definition);
+                tagged.AddRange(FetchCached(definition, refresh).Select(item => (item, source)));
+            }
+
+            return Resolve(tagged)
+                .GroupBy(MergeKey, StringComparer.OrdinalIgnoreCase)
+                .Select(Merge)
+                .OrderByDescending(i => i.DateAdded ?? DateTime.MinValue)
+                .ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private List<ImportListItemInfo> FetchCached(ImportListDefinition definition, bool refresh)
+        {
+            var cacheKey = definition.Id.ToString(CultureInfo.InvariantCulture);
 
             if (refresh)
             {
                 _cache.Remove(cacheKey);
             }
 
-            var items = _cache.Get(cacheKey, () => Fetch(definition), CacheDuration);
+            return _cache.Get(cacheKey, () => Fetch(definition), CacheDuration);
+        }
 
-            return Resolve(items);
+        private ImportListItemSource CreateSource(ImportListDefinition definition)
+        {
+            string implementationName = null;
+
+            try
+            {
+                implementationName = _importListFactory.GetInstance(definition)?.Name;
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "Unable to resolve the implementation name for import list '{0}'", definition.Name);
+            }
+
+            return new ImportListItemSource
+            {
+                ImportListId = definition.Id,
+                Name = definition.Name,
+                Implementation = definition.Implementation,
+                ImplementationName = implementationName.IsNotNullOrWhiteSpace() ? implementationName : definition.Implementation
+            };
+        }
+
+        private static string MergeKey(ImportListItem item)
+        {
+            if (item.Media.Any())
+            {
+                return "books:" + string.Join(",", item.Media.Select(m => m.BookId).OrderBy(id => id));
+            }
+
+            if (item.BookProviderId.IsNotNullOrWhiteSpace())
+            {
+                return "work:" + item.BookProviderId;
+            }
+
+            if (item.EditionProviderId.IsNotNullOrWhiteSpace())
+            {
+                return "edition:" + item.EditionProviderId;
+            }
+
+            return "title:" + (item.Title ?? string.Empty).Trim() + "|" + (item.Author ?? string.Empty).Trim();
+        }
+
+        private static ImportListItem Merge(IGrouping<string, ImportListItem> group)
+        {
+            var items = group.ToList();
+            var merged = items.OrderByDescending(i => i.DateAdded ?? DateTime.MinValue).First();
+
+            merged.Sources = items
+                .SelectMany(i => i.Sources)
+                .GroupBy(s => s.ImportListId)
+                .Select(g => g.First())
+                .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (items.Any(i => i.State == ImportListItemState.Excluded))
+            {
+                merged.State = ImportListItemState.Excluded;
+            }
+
+            return merged;
         }
 
         private List<ImportListItemInfo> Fetch(ImportListDefinition definition)
@@ -96,7 +182,7 @@ namespace NzbDrone.Core.ImportLists.Items
             }
         }
 
-        private List<ImportListItem> Resolve(List<ImportListItemInfo> items)
+        private List<ImportListItem> Resolve(List<(ImportListItemInfo Item, ImportListItemSource Source)> items)
         {
             var authorsByProviderId = new Dictionary<string, Author>(StringComparer.OrdinalIgnoreCase);
             var booksByAuthorId = new Dictionary<int, List<Book>>();
@@ -171,19 +257,19 @@ namespace NzbDrone.Core.ImportLists.Items
             }
 
             var matchedItems = items
-                .Select(item =>
+                .Select(tagged =>
                 {
-                    var author = FindAuthor(item.AuthorProviderId);
-                    var matched = author == null ? new List<Book>() : ImportListItemResolver.MatchBooks(BooksFor(author), item);
+                    var author = FindAuthor(tagged.Item.AuthorProviderId);
+                    var matched = author == null ? new List<Book>() : ImportListItemResolver.MatchBooks(BooksFor(author), tagged.Item);
 
-                    return (Item: item, Author: author, Matched: matched);
+                    return (tagged.Item, tagged.Source, Author: author, Matched: matched);
                 })
                 .ToList();
 
             var seriesLookup = BuildSeriesLookup(matchedItems.SelectMany(m => m.Matched).ToList(), matchedItems.Select(m => m.Author).Where(a => a != null).ToList());
             var result = new List<ImportListItem>();
 
-            foreach (var (item, author, matched) in matchedItems)
+            foreach (var (item, source, author, matched) in matchedItems)
             {
                 var authorProviderId = NormalizeProviderId(item.AuthorProviderId);
                 var bookProviderId = NormalizeProviderId(item.BookProviderId);
@@ -192,7 +278,14 @@ namespace NzbDrone.Core.ImportLists.Items
                     ? pendingImport
                     : null;
 
-                result.Add(ImportListItemResolver.Build(item, author, matched, HasFiles, IsQueued, QueueState, seriesLookup, pending, excluded));
+                var built = ImportListItemResolver.Build(item, author, matched, HasFiles, IsQueued, QueueState, seriesLookup, pending, excluded);
+
+                if (source != null)
+                {
+                    built.Sources.Add(source);
+                }
+
+                result.Add(built);
             }
 
             return result

@@ -9,6 +9,10 @@ interface CssExports {
   'empty': string;
   'leftHeader': string;
   'mediaLinks': string;
+  'source': string;
+  'sourceName': string;
+  'sourceType': string;
+  'sourcesCell': string;
   'states': string;
   'statusCell': string;
   'subtitle': string;
