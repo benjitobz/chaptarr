@@ -56,15 +56,20 @@
 
 .source {
   white-space: nowrap;
+
+  & + & {
+    margin-top: 6px;
+  }
 }
 
 .sourceName {
-  margin-right: 6px;
+  line-height: 1.3;
 }
 
 .sourceType {
   color: var(--helpTextColor);
   font-size: 12px;
+  line-height: 1.3;
 }
 
 .statusCell {

@@ -319,12 +319,12 @@ class ImportListItemsModalContent extends Component {
                     key={source.importListId}
                     className={styles.source}
                   >
-                    <span className={styles.sourceName}>{source.name}</span>
                     {
                       source.implementationName ?
-                        <span className={styles.sourceType}>{source.implementationName}</span> :
+                        <div className={styles.sourceType}>{source.implementationName}</div> :
                         null
                     }
+                    <div className={styles.sourceName}>{source.name}</div>
                   </div>
                 ))
               }
@@ -337,11 +337,22 @@ class ImportListItemsModalContent extends Component {
           </div>
         </TableRowCell>
 
-        <RelativeDateCellConnector
-          className={styles.dateCell}
-          date={releaseDate}
-          timeForToday={false}
-        />
+        {
+          releaseDate ?
+            <RelativeDateCellConnector
+              className={styles.dateCell}
+              date={releaseDate}
+              timeForToday={false}
+            /> :
+            <TableRowCell className={styles.dateCell}>
+              <Label
+                kind={kinds.DEFAULT}
+                outline={true}
+              >
+                {translate('NotAvailable')}
+              </Label>
+            </TableRowCell>
+        }
 
         <RelativeDateCellConnector
           className={styles.dateCell}
