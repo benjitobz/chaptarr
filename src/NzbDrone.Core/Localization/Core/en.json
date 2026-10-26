@@ -934,6 +934,7 @@
   "Importing": "Importing",
   "InClient": "In Client",
   "InLibrary": "In Library",
+  "InLibrarySince": "In library since",
   "IncludeCustomFormatWhenRenamingHelpText": "Only applies when your naming pattern contains {Custom Formats}.",
   "IncludeHealthWarningsHelpText": "Include Health Warnings",
   "IncludeUnknownAuthorItemsHelpText": "Show items without a author in the queue, this could include removed authors, books or anything else in Chaptarr's category",

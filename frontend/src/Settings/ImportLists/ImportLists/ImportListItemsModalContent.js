@@ -231,6 +231,7 @@ class ImportListItemsModalContent extends Component {
       bookId,
       releaseDate,
       dateAdded,
+      dateAddedFromList,
       bookProviderId,
       editionProviderId
     } = item;
@@ -354,10 +355,31 @@ class ImportListItemsModalContent extends Component {
             </TableRowCell>
         }
 
-        <RelativeDateCellConnector
-          className={styles.dateCell}
-          date={dateAdded}
-        />
+        {
+          dateAdded ?
+            <TableRowCell className={styles.dateCell}>
+              <RelativeDateCellConnector
+                component="span"
+                className={styles.dateValue}
+                date={dateAdded}
+              />
+              {
+                dateAddedFromList ?
+                  null :
+                  <div className={styles.dateSource}>
+                    {translate('InLibrarySince')}
+                  </div>
+              }
+            </TableRowCell> :
+            <TableRowCell className={styles.dateCell}>
+              <Label
+                kind={kinds.DEFAULT}
+                outline={true}
+              >
+                {translate('NotAvailable')}
+              </Label>
+            </TableRowCell>
+        }
       </TableRow>
     );
   }

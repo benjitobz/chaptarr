@@ -64,6 +64,11 @@ namespace NzbDrone.Core.ImportLists
 
         public abstract IList<ImportListItemInfo> Fetch();
 
+        public virtual IList<ImportListItemInfo> FetchForPreview()
+        {
+            return Fetch();
+        }
+
         private static object BuildDedupeKey(ImportListItemInfo item)
         {
             if (item == null)

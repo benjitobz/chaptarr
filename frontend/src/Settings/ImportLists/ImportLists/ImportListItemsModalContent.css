@@ -91,6 +91,15 @@
   white-space: nowrap;
 }
 
+.dateValue {
+  display: block;
+}
+
+.dateSource {
+  color: var(--helpTextColor);
+  font-size: 12px;
+}
+
 .empty {
   padding: 20px 0;
   color: var(--helpTextColor);
