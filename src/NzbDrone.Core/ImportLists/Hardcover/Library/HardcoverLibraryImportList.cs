@@ -448,7 +448,11 @@ namespace NzbDrone.Core.ImportLists.Hardcover.Library
             _stateRepository = stateRepository;
         }
 
-	        public override IList<ImportListItemInfo> Fetch()
+	        public override IList<ImportListItemInfo> Fetch() => FetchLibrary(preview: false);
+
+        public override IList<ImportListItemInfo> FetchForPreview() => FetchLibrary(preview: true);
+
+        private IList<ImportListItemInfo> FetchLibrary(bool preview)
 	        {
 	            // Only enable the schema fallback for the current sync run. If Hardcover restores the old schema,
 	            // subsequent runs will automatically prefer the richer `contributions { author { ... } }` query.
@@ -464,14 +468,14 @@ namespace NzbDrone.Core.ImportLists.Hardcover.Library
                 if (authHeader.IsNullOrWhiteSpace())
                 {
                     _logger.Warn("Hardcover library import skipped - no Hardcover API token configured");
-                    _importListStatusService.RecordFailure(Definition.Id);
+                    RecordFetchStatus(preview, success: false);
                     return CleanupListItems(results);
                 }
 
                 if (!hasPerListToken && !_configService.HardcoverEnabled)
                 {
                     _logger.Warn("Hardcover library import skipped - Hardcover not enabled");
-                    _importListStatusService.RecordFailure(Definition.Id);
+                    RecordFetchStatus(preview, success: false);
                     return CleanupListItems(results);
                 }
 
@@ -480,14 +484,14 @@ namespace NzbDrone.Core.ImportLists.Hardcover.Library
                 if (!Settings.ImportOwned && !Settings.ImportWantToRead && !Settings.ImportCurrentlyReading && !Settings.ImportRead)
                 {
                     _logger.Warn("Hardcover library import skipped - no library sections selected");
-                    _importListStatusService.RecordFailure(Definition.Id);
+                    RecordFetchStatus(preview, success: false);
                     return CleanupListItems(results);
                 }
 
                 var user = GetCurrentUser(authHeader);
                 if (user == null)
                 {
-                    _importListStatusService.RecordFailure(Definition.Id);
+                    RecordFetchStatus(preview, success: false);
                     return CleanupListItems(results);
                 }
 
@@ -498,8 +502,9 @@ namespace NzbDrone.Core.ImportLists.Hardcover.Library
                 var now = DateTime.UtcNow;
                 var settingsSignature = BuildSettingsSignature();
 
-                var state = _stateRepository.GetByImportListId(Definition.Id);
-                var baseNeedsFullSync = state == null ||
+                var state = preview ? null : _stateRepository.GetByImportListId(Definition.Id);
+                var baseNeedsFullSync = preview ||
+                                        state == null ||
                                         state.HardcoverUserId != user.Id ||
                                         !string.Equals(state.SettingsSignature, settingsSignature, StringComparison.Ordinal);
 
@@ -695,7 +700,7 @@ namespace NzbDrone.Core.ImportLists.Hardcover.Library
                     }
                 }
 
-                if (stateDirty)
+                if (stateDirty && !preview)
                 {
                     state.HardcoverUserId = user.Id;
                     state.SettingsSignature = settingsSignature;
@@ -711,15 +716,32 @@ namespace NzbDrone.Core.ImportLists.Hardcover.Library
                     }
                 }
 
-                _importListStatusService.RecordSuccess(Definition.Id);
+                RecordFetchStatus(preview, success: true);
             }
             catch (Exception ex)
             {
                 _logger.Warn(ex, "Hardcover library import failed");
-                _importListStatusService.RecordFailure(Definition.Id);
+                RecordFetchStatus(preview, success: false);
             }
 
             return CleanupListItems(results);
+        }
+
+                private void RecordFetchStatus(bool preview, bool success)
+        {
+            if (preview)
+            {
+                return;
+            }
+
+            if (success)
+            {
+                _importListStatusService.RecordSuccess(Definition.Id);
+            }
+            else
+            {
+                _importListStatusService.RecordFailure(Definition.Id);
+            }
         }
 
         protected override IList<ImportListItemInfo> CleanupListItems(IEnumerable<ImportListItemInfo> releases)

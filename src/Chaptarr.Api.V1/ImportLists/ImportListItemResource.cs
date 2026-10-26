@@ -45,6 +45,7 @@ namespace Chaptarr.Api.V1.ImportLists
         public ImportListItemState State { get; set; }
         public string PendingError { get; set; }
         public DateTime? DateAdded { get; set; }
+        public bool DateAddedFromList { get; set; }
         public string AuthorProviderId { get; set; }
         public string BookProviderId { get; set; }
         public string EditionProviderId { get; set; }
@@ -76,6 +77,7 @@ namespace Chaptarr.Api.V1.ImportLists
                 State = model.State,
                 PendingError = model.PendingError,
                 DateAdded = model.DateAdded,
+                DateAddedFromList = model.DateAddedFromList,
                 AuthorProviderId = model.AuthorProviderId,
                 BookProviderId = model.BookProviderId,
                 EditionProviderId = model.EditionProviderId,

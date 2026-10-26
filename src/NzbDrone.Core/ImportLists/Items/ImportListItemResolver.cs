@@ -88,7 +88,8 @@ namespace NzbDrone.Core.ImportLists.Items
                 EditionProviderId = NormalizeProviderId(item?.EditionProviderId),
                 Isbn13 = NormalizeIsbn13(item?.Isbn13),
                 AuthorId = author?.Id,
-                DateAdded = item != null && item.ReleaseDate > DateTime.MinValue ? item.ReleaseDate : null
+                DateAdded = item != null && item.ReleaseDate > DateTime.MinValue ? item.ReleaseDate : null,
+                DateAddedFromList = item != null && item.ReleaseDate > DateTime.MinValue
             };
 
             if (item?.Series.IsNotNullOrWhiteSpace() == true)

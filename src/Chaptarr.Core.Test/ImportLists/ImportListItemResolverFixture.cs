@@ -213,6 +213,8 @@ namespace Chaptarr.Core.Test.ImportLists
 
             Assert.Multiple(() =>
             {
+                Assert.That(ImportListItemResolver.Build(withDate, _author, new[] { book }, NoFiles, NotQueued, NoQueueState, NoSeries, null, false).DateAddedFromList, Is.True);
+                Assert.That(ImportListItemResolver.Build(CreateItem("Dark Age", bookProviderId: "111"), _author, new[] { book }, NoFiles, NotQueued, NoQueueState, NoSeries, null, false).DateAddedFromList, Is.False);
                 Assert.That(ImportListItemResolver.Build(withDate, _author, new[] { book }, NoFiles, NotQueued, NoQueueState, NoSeries, null, false).DateAdded, Is.EqualTo(withDate.ReleaseDate));
                 Assert.That(ImportListItemResolver.Build(CreateItem("Dark Age", bookProviderId: "111"), _author, new[] { book }, NoFiles, NotQueued, NoQueueState, NoSeries, null, false).DateAdded, Is.EqualTo(added));
                 Assert.That(ImportListItemResolver.Build(CreateItem("Dark Age", bookProviderId: "111"), null, Array.Empty<Book>(), NoFiles, NotQueued, NoQueueState, NoSeries, null, false).DateAdded, Is.Null);

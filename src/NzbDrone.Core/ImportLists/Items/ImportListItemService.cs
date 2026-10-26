@@ -173,7 +173,7 @@ namespace NzbDrone.Core.ImportLists.Items
 
             try
             {
-                return importList.Fetch()?.Where(i => i != null).ToList() ?? new List<ImportListItemInfo>();
+                return importList.FetchForPreview()?.Where(i => i != null).ToList() ?? new List<ImportListItemInfo>();
             }
             catch (Exception ex)
             {
@@ -224,6 +224,26 @@ namespace NzbDrone.Core.ImportLists.Items
                 return author;
             }
 
+            var authorsByName = new Dictionary<string, Author>(StringComparer.OrdinalIgnoreCase);
+
+            Author FindAuthorByName(ImportListItemInfo item)
+            {
+                if (item.AuthorProviderId.IsNotNullOrWhiteSpace() || item.Author.IsNullOrWhiteSpace())
+                {
+                    return null;
+                }
+
+                var name = item.Author.Trim();
+
+                if (!authorsByName.TryGetValue(name, out var author))
+                {
+                    author = _authorService.FindByName(name);
+                    authorsByName[name] = author;
+                }
+
+                return author;
+            }
+
             List<Book> BooksFor(Author author)
             {
                 if (!booksByAuthorId.TryGetValue(author.Id, out var books))
@@ -259,7 +279,7 @@ namespace NzbDrone.Core.ImportLists.Items
             var matchedItems = items
                 .Select(tagged =>
                 {
-                    var author = FindAuthor(tagged.Item.AuthorProviderId);
+                    var author = FindAuthor(tagged.Item.AuthorProviderId) ?? FindAuthorByName(tagged.Item);
                     var matched = author == null ? new List<Book>() : ImportListItemResolver.MatchBooks(BooksFor(author), tagged.Item);
 
                     return (tagged.Item, tagged.Source, Author: author, Matched: matched);

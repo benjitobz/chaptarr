@@ -6,6 +6,8 @@ interface CssExports {
   'coverCell': string;
   'coverLink': string;
   'dateCell': string;
+  'dateSource': string;
+  'dateValue': string;
   'empty': string;
   'leftHeader': string;
   'mediaLinks': string;

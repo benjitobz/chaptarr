@@ -43,6 +43,7 @@ namespace NzbDrone.Core.ImportLists.Items
         public string EditionProviderId { get; set; }
         public string Isbn13 { get; set; }
         public DateTime? DateAdded { get; set; }
+        public bool DateAddedFromList { get; set; }
         public int? AuthorId { get; set; }
         public int? BookId { get; set; }
         public ImportListItemState State { get; set; }
