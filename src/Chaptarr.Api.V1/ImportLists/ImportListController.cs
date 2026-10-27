@@ -18,8 +18,6 @@ namespace Chaptarr.Api.V1.ImportLists
         public static readonly ImportListResourceMapper ResourceMapper = new();
         public static readonly ImportListBulkResourceMapper BulkResourceMapper = new();
 
-        private const int MaxItemsPageSize = 500;
-
         private readonly IImportListItemService _importListItemService;
         private readonly IMapCoversToLocal _coverMapper;
 
@@ -51,14 +49,12 @@ namespace Chaptarr.Api.V1.ImportLists
         }
 
         [HttpGet("{id:int}/items")]
-        [Produces("application/json")]
         public PagingResource<ImportListItemResource> GetItems([FromRoute] int id, [FromQuery] PagingRequestResource paging, [FromQuery] bool refresh = false)
         {
             return Page(_importListItemService.GetItems(id, refresh), paging);
         }
 
         [HttpGet("items")]
-        [Produces("application/json")]
         public PagingResource<ImportListItemResource> GetAllItems([FromQuery] PagingRequestResource paging, [FromQuery] bool refresh = false)
         {
             return Page(_importListItemService.GetAllItems(refresh), paging);
@@ -66,66 +62,30 @@ namespace Chaptarr.Api.V1.ImportLists
 
         private PagingResource<ImportListItemResource> Page(List<ImportListItem> items, PagingRequestResource paging)
         {
-            var pagingResource = new PagingResource<ImportListItemResource>(paging);
-            var page = Math.Max(pagingResource.Page, 1);
-            var pageSize = Math.Clamp(pagingResource.PageSize, 1, MaxItemsPageSize);
-            var sortKey = string.IsNullOrWhiteSpace(pagingResource.SortKey) ? "dateAdded" : pagingResource.SortKey;
-            var sortDirection = pagingResource.SortDirection == SortDirection.Ascending ? SortDirection.Ascending : SortDirection.Descending;
-
-            var ordered = Sort(items, sortKey, sortDirection);
-
-            var records = ordered
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .Select(ToResource)
-                .ToList();
+            var page = Math.Max(paging.Page ?? 1, 1);
+            var pageSize = Math.Max(paging.PageSize ?? 10, 1);
 
             return new PagingResource<ImportListItemResource>
             {
                 Page = page,
                 PageSize = pageSize,
-                SortKey = sortKey,
-                SortDirection = sortDirection,
+                SortKey = "dateAdded",
+                SortDirection = SortDirection.Descending,
                 TotalRecords = items.Count,
-                Records = records
+                Records = items.Skip((page - 1) * pageSize).Take(pageSize).Select(ToResourceWithLocalCovers).ToList()
             };
         }
 
-        private ImportListItemResource ToResource(ImportListItem item)
+        private ImportListItemResource ToResourceWithLocalCovers(ImportListItem item)
         {
             var resource = item.ToResource();
 
-            if (item.BookId.HasValue && resource.Images.Any())
+            if (item.BookId.HasValue)
             {
                 _coverMapper.ConvertToLocalUrls(item.BookId.Value, MediaCoverEntity.Book, resource.Images);
             }
 
             return resource;
-        }
-
-        private static IEnumerable<ImportListItem> Sort(List<ImportListItem> items, string sortKey, SortDirection direction)
-        {
-            var descending = direction == SortDirection.Descending;
-
-            switch (sortKey.ToLowerInvariant())
-            {
-                case "title":
-                    return descending
-                        ? items.OrderByDescending(i => i.Title, StringComparer.OrdinalIgnoreCase)
-                        : items.OrderBy(i => i.Title, StringComparer.OrdinalIgnoreCase);
-                case "state":
-                    return descending
-                        ? items.OrderByDescending(i => i.State).ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase)
-                        : items.OrderBy(i => i.State).ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase);
-                case "releasedate":
-                    return descending
-                        ? items.OrderByDescending(i => i.ReleaseDate ?? DateTime.MinValue).ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase)
-                        : items.OrderBy(i => i.ReleaseDate ?? DateTime.MinValue).ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase);
-                default:
-                    return descending
-                        ? items.OrderByDescending(i => i.DateAdded ?? DateTime.MinValue).ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase)
-                        : items.OrderBy(i => i.DateAdded ?? DateTime.MinValue).ThenBy(i => i.Title, StringComparer.OrdinalIgnoreCase);
-            }
         }
     }
 }

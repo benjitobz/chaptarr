@@ -3,17 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading.Tasks;
 using NLog;
 using NUnit.Framework;
 using NzbDrone.Common.Http;
-using NzbDrone.Core.Books;
 using NzbDrone.Core.ImportLists;
 using NzbDrone.Core.ImportLists.Hardcover.Library;
-using NzbDrone.Core.Profiles.Metadata;
-using NzbDrone.Core.Profiles.Qualities;
-using NzbDrone.Core.RootFolders;
-using NzbDrone.Core.Tags;
-using NzbDrone.Core.ThingiProvider.Status;
 
 namespace Chaptarr.Core.Test.ImportLists.Hardcover
 {
@@ -85,22 +80,13 @@ namespace Chaptarr.Core.Test.ImportLists.Hardcover
             public HttpResponse Head(HttpRequest request) => throw new NotImplementedException();
             public HttpResponse Post(HttpRequest request) => throw new NotImplementedException();
             public HttpResponse<T> Post<T>(HttpRequest request) where T : new() => throw new NotImplementedException();
-            public System.Threading.Tasks.Task<HttpResponse> ExecuteAsync(HttpRequest request) => throw new NotImplementedException();
-            public System.Threading.Tasks.Task DownloadFileAsync(string url, string fileName, string userAgent = null) => throw new NotImplementedException();
-            public System.Threading.Tasks.Task<HttpResponse> GetAsync(HttpRequest request) => throw new NotImplementedException();
-            public System.Threading.Tasks.Task<HttpResponse<T>> GetAsync<T>(HttpRequest request) where T : new() => throw new NotImplementedException();
-            public System.Threading.Tasks.Task<HttpResponse> HeadAsync(HttpRequest request) => throw new NotImplementedException();
-            public System.Threading.Tasks.Task<HttpResponse> PostAsync(HttpRequest request) => throw new NotImplementedException();
-            public System.Threading.Tasks.Task<HttpResponse<T>> PostAsync<T>(HttpRequest request) where T : new() => throw new NotImplementedException();
-        }
-
-        private class ThrowingProxy<T> : DispatchProxy
-            where T : class
-        {
-            protected override object Invoke(MethodInfo targetMethod, object[] args)
-            {
-                throw new NotImplementedException($"Test proxy does not implement {typeof(T).Name}.{targetMethod?.Name}");
-            }
+            public Task<HttpResponse> ExecuteAsync(HttpRequest request) => throw new NotImplementedException();
+            public Task DownloadFileAsync(string url, string fileName, string userAgent = null) => throw new NotImplementedException();
+            public Task<HttpResponse> GetAsync(HttpRequest request) => throw new NotImplementedException();
+            public Task<HttpResponse<T>> GetAsync<T>(HttpRequest request) where T : new() => throw new NotImplementedException();
+            public Task<HttpResponse> HeadAsync(HttpRequest request) => throw new NotImplementedException();
+            public Task<HttpResponse> PostAsync(HttpRequest request) => throw new NotImplementedException();
+            public Task<HttpResponse<T>> PostAsync<T>(HttpRequest request) where T : new() => throw new NotImplementedException();
         }
 
         private GraphQlStubHttpClient _httpClient;
@@ -130,18 +116,7 @@ namespace Chaptarr.Core.Test.ImportLists.Hardcover
             _stateRepository = (StateRepositoryProxy)(object)repository;
             _stateRepository.State = _state;
 
-            _importList = new HardcoverLibraryImportList(
-                _httpClient,
-                new Lazy<IQualityProfileService>(() => DispatchProxy.Create<IQualityProfileService, ThrowingProxy<IQualityProfileService>>()),
-                new Lazy<IMetadataProfileService>(() => DispatchProxy.Create<IMetadataProfileService, ThrowingProxy<IMetadataProfileService>>()),
-                new Lazy<ITagService>(() => DispatchProxy.Create<ITagService, ThrowingProxy<ITagService>>()),
-                DispatchProxy.Create<IRootFolderService, ThrowingProxy<IRootFolderService>>(),
-                DispatchProxy.Create<IRootFolderSettingsResolver, ThrowingProxy<IRootFolderSettingsResolver>>(),
-                repository,
-                _statusService,
-                null,
-                null,
-                LogManager.GetCurrentClassLogger())
+            _importList = new HardcoverLibraryImportList(_httpClient, null, null, null, null, null, repository, _statusService, null, null, LogManager.GetCurrentClassLogger())
             {
                 Definition = new ImportListDefinition
                 {

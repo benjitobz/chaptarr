@@ -416,12 +416,8 @@ namespace Chaptarr.Core.Test.ImportLists.Goodreads
             Assert.Multiple(() =>
             {
                 Assert.That(unread.ReleaseDate, Is.EqualTo(new DateTime(2026, 10, 11, 17, 24, 36, DateTimeKind.Utc)));
-                Assert.That(unread.Series, Is.EqualTo("Test Saga"));
-                Assert.That(unread.SeriesPosition, Is.EqualTo("7"));
                 Assert.That(unread.PublishedDate, Is.EqualTo(new DateTime(2027, 1, 1, 0, 0, 0, DateTimeKind.Utc)));
                 Assert.That(read.ReleaseDate, Is.EqualTo(new DateTime(2026, 10, 1, 16, 30, 0, DateTimeKind.Utc)));
-                Assert.That(read.Series, Is.EqualTo("Test Saga"));
-                Assert.That(read.SeriesPosition, Is.EqualTo("1-3"));
                 Assert.That(read.PublishedDate, Is.EqualTo(new DateTime(2018, 3, 14, 0, 0, 0, DateTimeKind.Utc)));
             });
         }

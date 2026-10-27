@@ -448,7 +448,7 @@ namespace NzbDrone.Core.ImportLists.Hardcover.Library
             _stateRepository = stateRepository;
         }
 
-	        public override IList<ImportListItemInfo> Fetch() => FetchLibrary(preview: false);
+        public override IList<ImportListItemInfo> Fetch() => FetchLibrary(preview: false);
 
         public override IList<ImportListItemInfo> FetchForPreview() => FetchLibrary(preview: true);
 
@@ -727,7 +727,7 @@ namespace NzbDrone.Core.ImportLists.Hardcover.Library
             return CleanupListItems(results);
         }
 
-                private void RecordFetchStatus(bool preview, bool success)
+        private void RecordFetchStatus(bool preview, bool success)
         {
             if (preview)
             {

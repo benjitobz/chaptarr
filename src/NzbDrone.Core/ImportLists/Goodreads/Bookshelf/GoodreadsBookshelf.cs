@@ -542,7 +542,6 @@ namespace NzbDrone.Core.ImportLists.Goodreads
 
                     var pubDate = item.Element("pubDate")?.Value?.Trim();
                     var releaseDate = ParseRssPubDate(pubDate);
-                    var (series, seriesPosition) = ParseSeriesSuffix(title);
 
                     if (bookId.IsNullOrWhiteSpace() && title.IsNullOrWhiteSpace() && authorName.IsNullOrWhiteSpace())
                     {
@@ -556,8 +555,6 @@ namespace NzbDrone.Core.ImportLists.Goodreads
                         Book = title,
                         EditionGoodreadsId = PrefixGoodreadsId(bookId),
                         ReleaseDate = releaseDate,
-                        Series = series,
-                        SeriesPosition = seriesPosition,
                         PublishedDate = ParsePublicationDate(ParseIntElement(item, "book_published"), null, null)
                     };
                 }
@@ -755,7 +752,6 @@ namespace NzbDrone.Core.ImportLists.Goodreads
                 var isbn13 = book.Element("isbn13")?.Value?.Trim();
                 var asin = FirstNonBlank(book.Element("kindle_asin")?.Value, book.Element("asin")?.Value)?.Trim();
                 var releaseDate = ParseReviewDate(review, "date_added") ?? ParseReviewDate(review, "read_at") ?? default;
-                var (series, seriesPosition) = ParseSeriesSuffix(book.Element("title")?.Value);
                 var publishedDate = ParsePublicationDate(
                     ParseIntElement(book, "publication_year") ?? ParseIntElement(book, "published"),
                     ParseIntElement(book, "publication_month"),
@@ -776,38 +772,9 @@ namespace NzbDrone.Core.ImportLists.Goodreads
                     Isbn13 = isbn13,
                     Asin = asin,
                     ReleaseDate = releaseDate,
-                    Series = series,
-                    SeriesPosition = seriesPosition,
                     PublishedDate = publishedDate
                 };
             }
-        }
-
-        private static readonly Regex SeriesSuffixRegex = new(@"\((?<content>[^()]*#[^()]*)\)\s*$", RegexOptions.Compiled);
-        private static readonly Regex SeriesEntryRegex = new(@"^(?<series>.+?)\s*,?\s*#\s*(?<position>\d+(?:\.\d+)?(?:\s*[-\u2013]\s*\d+(?:\.\d+)?)?)\s*$", RegexOptions.Compiled);
-
-        private static (string Series, string Position) ParseSeriesSuffix(string title)
-        {
-            if (title.IsNullOrWhiteSpace())
-            {
-                return (null, null);
-            }
-
-            var suffix = SeriesSuffixRegex.Match(title.Trim());
-
-            if (!suffix.Success)
-            {
-                return (null, null);
-            }
-
-            var entry = SeriesEntryRegex.Match(suffix.Groups["content"].Value.Split(';')[0].Trim());
-
-            if (!entry.Success)
-            {
-                return (null, null);
-            }
-
-            return (entry.Groups["series"].Value.Trim(), Regex.Replace(entry.Groups["position"].Value, @"\s+", string.Empty));
         }
 
         private static DateTime? ParsePublicationDate(int? year, int? month, int? day)
@@ -825,7 +792,7 @@ namespace NzbDrone.Core.ImportLists.Goodreads
 
         private static int? ParseIntElement(XElement parent, string name)
         {
-            var raw = parent?.Element(name)?.Value?.Trim();
+            var raw = parent.Element(name)?.Value?.Trim();
 
             return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : null;
         }
@@ -984,18 +951,11 @@ namespace NzbDrone.Core.ImportLists.Goodreads
             return channelTitle.Substring(colonIndex + 1).Trim();
         }
 
-        private static DateTime? ParseReviewDate(XElement review, string elementName)
+        private static DateTime? ParseReviewDate(XElement review, string name)
         {
-            var parsed = review.ElementAsDateTime(elementName);
+            var parsed = review.ElementAsDateTime(name) ?? ParseRssPubDate(review.Element(name)?.Value);
 
-            if (parsed.HasValue)
-            {
-                return parsed;
-            }
-
-            var fallback = ParseRssPubDate(review.Element(elementName)?.Value);
-
-            return fallback == default ? null : fallback;
+            return parsed == default ? null : parsed;
         }
 
         private static DateTime ParseRssPubDate(string pubDate)
