@@ -125,9 +125,10 @@ namespace NzbDrone.Core.ImportLists.Items
 
             foreach (var list in lists)
             {
-                var source = new ImportListItemSource { ImportListId = list.Id, Name = list.Name, ImplementationName = list.ImplementationName };
+                var importList = _importListFactory.GetInstance(list);
+                var source = new ImportListItemSource { ImportListId = list.Id, Name = list.Name, ImplementationName = importList.Name };
 
-                foreach (var item in Fetch(list, refresh))
+                foreach (var item in Fetch(importList, refresh))
                 {
                     var authorProviderId = ImportListItemResolver.NormalizeProviderId(item.AuthorProviderId);
                     var bookProviderId = ImportListItemResolver.NormalizeProviderId(item.BookProviderId);
@@ -147,9 +148,9 @@ namespace NzbDrone.Core.ImportLists.Items
             return result;
         }
 
-        private List<ImportListItemInfo> Fetch(ImportListDefinition definition, bool refresh)
+        private List<ImportListItemInfo> Fetch(IImportList importList, bool refresh)
         {
-            var key = definition.Id.ToString(CultureInfo.InvariantCulture);
+            var key = importList.Definition.Id.ToString(CultureInfo.InvariantCulture);
 
             if (refresh)
             {
@@ -160,11 +161,11 @@ namespace NzbDrone.Core.ImportLists.Items
             {
                 try
                 {
-                    return _importListFactory.GetInstance(definition).FetchForPreview().ToList();
+                    return importList.FetchForPreview().ToList();
                 }
                 catch (Exception ex)
                 {
-                    _logger.Warn(ex, "Unable to fetch items for import list '{0}'", definition.Name);
+                    _logger.Warn(ex, "Unable to fetch items for import list '{0}'", importList.Definition.Name);
                     return new List<ImportListItemInfo>();
                 }
             }, CacheDuration);
