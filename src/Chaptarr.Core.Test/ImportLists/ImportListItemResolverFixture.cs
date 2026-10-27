@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
 using NzbDrone.Core.Books;
-using NzbDrone.Core.Download.TrackedDownloads;
 using NzbDrone.Core.ImportLists.Items;
 using NzbDrone.Core.Parser.Model;
 
@@ -12,10 +11,7 @@ namespace Chaptarr.Core.Test.ImportLists
     [TestFixture]
     public class ImportListItemResolverFixture
     {
-        private static readonly Func<int, bool> NoFiles = _ => false;
-        private static readonly Func<int, bool> NotQueued = _ => false;
-        private static readonly Func<int, TrackedDownloadState?> NoQueueState = _ => null;
-        private static readonly Func<int, List<ImportListItemSeries>> NoSeries = _ => null;
+        private static readonly Func<int, bool> None = _ => false;
 
         private Author _author;
 
@@ -36,9 +32,8 @@ namespace Chaptarr.Core.Test.ImportLists
         public void match_books_should_match_on_work_id()
         {
             var book = CreateBook(1, "Red Rising", BookMediaType.Ebook, workId: "gr:15839976");
-            var item = CreateItem("Red Rising", bookProviderId: "15839976");
 
-            var result = ImportListItemResolver.MatchBooks(new[] { book }, item);
+            var result = ImportListItemResolver.MatchBooks(new List<Book> { book }, CreateItem("Red Rising", bookProviderId: "15839976"));
 
             Assert.That(result.Select(b => b.Id), Is.EqualTo(new[] { 1 }));
         }
@@ -48,9 +43,8 @@ namespace Chaptarr.Core.Test.ImportLists
         {
             var ebook = CreateBook(1, "Dark Age", BookMediaType.Ebook, workId: "gr:111", goodreadsEditionId: 555);
             var audiobook = CreateBook(2, "Dark Age", BookMediaType.Audiobook, workId: "gr:111");
-            var item = CreateItem("Dark Age", bookProviderId: "999", editionProviderId: "555");
 
-            var result = ImportListItemResolver.MatchBooks(new[] { ebook, audiobook }, item);
+            var result = ImportListItemResolver.MatchBooks(new List<Book> { ebook, audiobook }, CreateItem("Dark Age", bookProviderId: "999", editionProviderId: "555"));
 
             Assert.That(result.Select(b => b.Id), Is.EquivalentTo(new[] { 1, 2 }));
         }
@@ -59,9 +53,8 @@ namespace Chaptarr.Core.Test.ImportLists
         public void match_books_should_fall_back_to_isbn()
         {
             var book = CreateBook(1, "Light Bringer", BookMediaType.Ebook, workId: "gr:222", isbn13: "978-0-425-28599-6");
-            var item = CreateItem("Light Bringer", bookProviderId: "333", isbn13: "9780425285996");
 
-            var result = ImportListItemResolver.MatchBooks(new[] { book }, item);
+            var result = ImportListItemResolver.MatchBooks(new List<Book> { book }, CreateItem("Light Bringer", bookProviderId: "333", isbn13: "9780425285996"));
 
             Assert.That(result.Select(b => b.Id), Is.EqualTo(new[] { 1 }));
         }
@@ -75,8 +68,8 @@ namespace Chaptarr.Core.Test.ImportLists
 
             Assert.Multiple(() =>
             {
-                Assert.That(ImportListItemResolver.MatchBooks(new[] { book }, item).Select(b => b.Id), Is.EqualTo(new[] { 1 }));
-                Assert.That(ImportListItemResolver.MatchBooks(new[] { book, otherWorkSameTitle }, item), Is.Empty);
+                Assert.That(ImportListItemResolver.MatchBooks(new List<Book> { book }, item).Select(b => b.Id), Is.EqualTo(new[] { 1 }));
+                Assert.That(ImportListItemResolver.MatchBooks(new List<Book> { book, otherWorkSameTitle }, item), Is.Empty);
             });
         }
 
@@ -84,9 +77,8 @@ namespace Chaptarr.Core.Test.ImportLists
         public void match_books_should_return_empty_when_nothing_matches()
         {
             var book = CreateBook(1, "Golden Son", BookMediaType.Ebook, workId: "gr:1");
-            var item = CreateItem("Iron Gold", bookProviderId: "2", editionProviderId: "3", isbn13: "9780000000002");
 
-            Assert.That(ImportListItemResolver.MatchBooks(new[] { book }, item), Is.Empty);
+            Assert.That(ImportListItemResolver.MatchBooks(new List<Book> { book }, CreateItem("Iron Gold", bookProviderId: "2", editionProviderId: "3", isbn13: "9780000000002")), Is.Empty);
         }
 
         [Test]
@@ -94,37 +86,16 @@ namespace Chaptarr.Core.Test.ImportLists
         {
             var ebook = CreateBook(1, "Dark Age", BookMediaType.Ebook, workId: "gr:111");
             var audiobook = CreateBook(2, "Dark Age", BookMediaType.Audiobook, workId: "gr:111");
-            var item = CreateItem("Dark Age", bookProviderId: "111");
 
-            var result = ImportListItemResolver.Build(item, _author, new[] { ebook, audiobook }, id => id == 1, id => id == 2, id => id == 2 ? TrackedDownloadState.Downloading : null, NoSeries, null, false);
-
-            var ebookState = result.Media.Single(m => m.MediaType == BookMediaType.Ebook);
-            var audiobookState = result.Media.Single(m => m.MediaType == BookMediaType.Audiobook);
+            var result = Build(new List<Book> { ebook, audiobook }, hasFiles: id => id == 1, isQueued: id => id == 2);
 
             Assert.Multiple(() =>
             {
                 Assert.That(result.State, Is.EqualTo(ImportListItemState.Downloaded));
                 Assert.That(result.BookId, Is.EqualTo(1));
-                Assert.That(result.AuthorId, Is.EqualTo(7));
                 Assert.That(result.Author, Is.EqualTo("Pierce Brown"));
-                Assert.That(result.Media, Has.Count.EqualTo(2));
-                Assert.That(ebookState.State, Is.EqualTo(ImportListItemState.Downloaded));
-                Assert.That(audiobookState.State, Is.EqualTo(ImportListItemState.Queued));
-                Assert.That(audiobookState.QueueState, Is.EqualTo(TrackedDownloadState.Downloading));
-            });
-        }
-
-        [Test]
-        public void build_should_report_queued_for_pending_releases_without_a_tracked_state()
-        {
-            var book = CreateBook(1, "Dark Age", BookMediaType.Ebook, workId: "gr:111");
-
-            var result = ImportListItemResolver.Build(CreateItem("Dark Age", bookProviderId: "111"), _author, new[] { book }, NoFiles, _ => true, NoQueueState, NoSeries, null, false);
-
-            Assert.Multiple(() =>
-            {
-                Assert.That(result.State, Is.EqualTo(ImportListItemState.Queued));
-                Assert.That(result.Media.Single().QueueState, Is.Null);
+                Assert.That(result.Media.Single(m => m.MediaType == BookMediaType.Ebook).State, Is.EqualTo(ImportListItemState.Downloaded));
+                Assert.That(result.Media.Single(m => m.MediaType == BookMediaType.Audiobook).State, Is.EqualTo(ImportListItemState.Queued));
             });
         }
 
@@ -137,7 +108,7 @@ namespace Chaptarr.Core.Test.ImportLists
             unmonitored.AudiobookMonitored = false;
             unmonitored.EbookMonitored = false;
 
-            var result = ImportListItemResolver.Build(CreateItem("Dark Age", bookProviderId: "111"), _author, new[] { monitored, unmonitored }, NoFiles, NotQueued, NoQueueState, NoSeries, null, false);
+            var result = Build(new List<Book> { monitored, unmonitored });
 
             Assert.Multiple(() =>
             {
@@ -150,7 +121,7 @@ namespace Chaptarr.Core.Test.ImportLists
         [Test]
         public void build_should_report_not_in_library_when_author_is_missing()
         {
-            var result = ImportListItemResolver.Build(CreateItem("Dark Age", bookProviderId: "111"), null, Array.Empty<Book>(), NoFiles, NotQueued, NoQueueState, NoSeries, null, false);
+            var result = Build(new List<Book>(), withAuthor: false);
 
             Assert.Multiple(() =>
             {
@@ -166,7 +137,7 @@ namespace Chaptarr.Core.Test.ImportLists
         {
             var pending = new PendingAuthorImport { ProviderId = "gr:7", LastError = "Author not yet available" };
 
-            var result = ImportListItemResolver.Build(CreateItem("Dark Age", bookProviderId: "111"), null, Array.Empty<Book>(), NoFiles, NotQueued, NoQueueState, NoSeries, pending, false);
+            var result = Build(new List<Book>(), withAuthor: false, pending: pending);
 
             Assert.Multiple(() =>
             {
@@ -178,13 +149,7 @@ namespace Chaptarr.Core.Test.ImportLists
         [Test]
         public void build_should_report_not_in_library_when_author_exists_but_book_does_not()
         {
-            var result = ImportListItemResolver.Build(CreateItem("Dark Age", bookProviderId: "111"), _author, Array.Empty<Book>(), NoFiles, NotQueued, NoQueueState, NoSeries, null, false);
-
-            Assert.Multiple(() =>
-            {
-                Assert.That(result.State, Is.EqualTo(ImportListItemState.NotInLibrary));
-                Assert.That(result.AuthorId, Is.EqualTo(7));
-            });
+            Assert.That(Build(new List<Book>()).State, Is.EqualTo(ImportListItemState.NotInLibrary));
         }
 
         [Test]
@@ -192,7 +157,7 @@ namespace Chaptarr.Core.Test.ImportLists
         {
             var book = CreateBook(1, "Dark Age", BookMediaType.Ebook, workId: "gr:111");
 
-            var result = ImportListItemResolver.Build(CreateItem("Dark Age", bookProviderId: "111"), _author, new[] { book }, _ => true, NotQueued, NoQueueState, NoSeries, null, true);
+            var result = Build(new List<Book> { book }, hasFiles: _ => true, excluded: true);
 
             Assert.Multiple(() =>
             {
@@ -202,100 +167,47 @@ namespace Chaptarr.Core.Test.ImportLists
         }
 
         [Test]
-        public void build_should_use_release_date_as_date_added_and_fall_back_to_book_added()
+        public void build_should_use_the_list_date_as_date_added_and_fall_back_to_the_library_add_date()
         {
-            var added = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
             var book = CreateBook(1, "Dark Age", BookMediaType.Ebook, workId: "gr:111");
-            book.Added = added;
+            book.Added = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
 
             var withDate = CreateItem("Dark Age", bookProviderId: "111");
             withDate.ReleaseDate = new DateTime(2026, 10, 20, 0, 0, 0, DateTimeKind.Utc);
 
+            var fromList = Build(new List<Book> { book }, item: withDate);
+            var fromLibrary = Build(new List<Book> { book });
+            var notInLibrary = Build(new List<Book>(), withAuthor: false);
+
             Assert.Multiple(() =>
             {
-                Assert.That(ImportListItemResolver.Build(withDate, _author, new[] { book }, NoFiles, NotQueued, NoQueueState, NoSeries, null, false).DateAddedFromList, Is.True);
-                Assert.That(ImportListItemResolver.Build(CreateItem("Dark Age", bookProviderId: "111"), _author, new[] { book }, NoFiles, NotQueued, NoQueueState, NoSeries, null, false).DateAddedFromList, Is.False);
-                Assert.That(ImportListItemResolver.Build(withDate, _author, new[] { book }, NoFiles, NotQueued, NoQueueState, NoSeries, null, false).DateAdded, Is.EqualTo(withDate.ReleaseDate));
-                Assert.That(ImportListItemResolver.Build(CreateItem("Dark Age", bookProviderId: "111"), _author, new[] { book }, NoFiles, NotQueued, NoQueueState, NoSeries, null, false).DateAdded, Is.EqualTo(added));
-                Assert.That(ImportListItemResolver.Build(CreateItem("Dark Age", bookProviderId: "111"), null, Array.Empty<Book>(), NoFiles, NotQueued, NoQueueState, NoSeries, null, false).DateAdded, Is.Null);
+                Assert.That(fromList.DateAdded, Is.EqualTo(withDate.ReleaseDate));
+                Assert.That(fromList.DateAddedFromList, Is.True);
+                Assert.That(fromLibrary.DateAdded, Is.EqualTo(book.Added));
+                Assert.That(fromLibrary.DateAddedFromList, Is.False);
+                Assert.That(notInLibrary.DateAdded, Is.Null);
             });
         }
 
         [Test]
-        public void build_should_prefer_library_series_and_release_date_over_list_values()
+        public void build_should_prefer_the_library_release_date_over_the_list_value()
         {
             var book = CreateBook(1, "Dark Age", BookMediaType.Ebook, workId: "gr:111");
             book.ReleaseDate = new DateTime(2019, 7, 30, 0, 0, 0, DateTimeKind.Utc);
 
             var item = CreateItem("Dark Age", bookProviderId: "111");
-            item.Series = "Red Rising Saga (feed)";
-            item.SeriesPosition = "5";
             item.PublishedDate = new DateTime(2019, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-            var fromLibrary = ImportListItemResolver.Build(item, _author, new[] { book }, NoFiles, NotQueued, NoQueueState, id => id == 1 ? new List<ImportListItemSeries> { new() { Title = "Red Rising Saga", Position = "5" } } : null, null, false);
-            var withoutLinks = ImportListItemResolver.Build(item, _author, new[] { book }, NoFiles, NotQueued, NoQueueState, NoSeries, null, false);
-            var notInLibrary = ImportListItemResolver.Build(item, null, Array.Empty<Book>(), NoFiles, NotQueued, NoQueueState, NoSeries, null, false);
-
             Assert.Multiple(() =>
             {
-                Assert.That(fromLibrary.Series.Single().Title, Is.EqualTo("Red Rising Saga"));
-                Assert.That(fromLibrary.Series.Single().Position, Is.EqualTo("5"));
-                Assert.That(fromLibrary.ReleaseDate, Is.EqualTo(book.ReleaseDate));
-                Assert.That(withoutLinks.Series.Single().Title, Is.EqualTo("Red Rising Saga (feed)"));
-                Assert.That(withoutLinks.ReleaseDate, Is.EqualTo(book.ReleaseDate));
-                Assert.That(notInLibrary.Series.Single().Title, Is.EqualTo("Red Rising Saga (feed)"));
-                Assert.That(notInLibrary.Series.Single().Position, Is.EqualTo("5"));
-                Assert.That(notInLibrary.ReleaseDate, Is.EqualTo(item.PublishedDate));
+                Assert.That(Build(new List<Book> { book }, item: item).ReleaseDate, Is.EqualTo(book.ReleaseDate));
+                Assert.That(Build(new List<Book>(), item: item, withAuthor: false).ReleaseDate, Is.EqualTo(item.PublishedDate));
             });
         }
 
-        [Test]
-        public void build_series_list_should_clean_positions_and_drop_title_variants()
+        private ImportListItem Build(List<Book> books, ImportListItemInfo item = null, bool withAuthor = true, Func<int, bool> hasFiles = null, Func<int, bool> isQueued = null, PendingAuthorImport pending = null, bool excluded = false)
         {
-            var seriesById = new Dictionary<int, Series>
-            {
-                [1] = new Series { Id = 1, Title = "Red Rising Saga", WorkCount = 7 },
-                [2] = new Series { Id = 2, Title = "Red Rising Saga Dramatic Adaptations", WorkCount = 6 }
-            };
-
-            var links = new List<SeriesBookLink>
-            {
-                new() { Id = 10, SeriesId = 1, BookId = 1, Position = "5", SeriesPosition = 5, IsPrimary = true },
-                new() { Id = 11, SeriesId = 2, BookId = 1, Position = "5, part 1", SeriesPosition = 0, IsPrimary = true }
-            };
-
-            var result = ImportListItemResolver.BuildSeriesList(links, id => seriesById.GetValueOrDefault(id));
-
-            Assert.Multiple(() =>
-            {
-                Assert.That(result, Has.Count.EqualTo(1));
-                Assert.That(result.Single().Title, Is.EqualTo("Red Rising Saga"));
-                Assert.That(result.Single().Position, Is.EqualTo("5"));
-            });
-        }
-
-        [Test]
-        public void build_series_list_should_put_specific_series_before_umbrella_series()
-        {
-            var seriesById = new Dictionary<int, Series>
-            {
-                [137] = new Series { Id = 137, Title = "The Cosmere", WorkCount = 30 },
-                [143] = new Series { Id = 143, Title = "The Stormlight Archive", WorkCount = 10 }
-            };
-
-            var links = new List<SeriesBookLink>
-            {
-                new() { Id = 20, SeriesId = 137, BookId = 1, Position = "6", SeriesPosition = 6, IsPrimary = true },
-                new() { Id = 21, SeriesId = 143, BookId = 1, Position = "1, 1, Part 1, 1, Part 2", SeriesPosition = 0, IsPrimary = true }
-            };
-
-            var result = ImportListItemResolver.BuildSeriesList(links, id => seriesById.GetValueOrDefault(id));
-
-            Assert.Multiple(() =>
-            {
-                Assert.That(result.Select(s => s.Title), Is.EqualTo(new[] { "The Stormlight Archive", "The Cosmere" }));
-                Assert.That(result.Select(s => s.Position), Is.EqualTo(new[] { "1", "6" }));
-            });
+            return ImportListItemResolver.Build(item ?? CreateItem("Dark Age", bookProviderId: "111"), withAuthor ? _author : null, books, hasFiles ?? None, isQueued ?? None, pending, excluded);
         }
 
         private Book CreateBook(int id, string title, BookMediaType mediaType, string workId, long? goodreadsEditionId = null, string isbn13 = null)
@@ -315,11 +227,9 @@ namespace Chaptarr.Core.Test.ImportLists
             {
                 Id = id,
                 AuthorId = _author.Id,
-                Author = _author,
                 MediaType = mediaType,
                 GoodreadsWorkId = workId,
                 Title = title,
-                TitleSlug = $"{id}-{title.ToLowerInvariant().Replace(' ', '-')}",
                 Monitored = true,
                 AudiobookMonitored = true,
                 EbookMonitored = true,

@@ -18,58 +18,52 @@ import TablePager from 'Components/Table/TablePager';
 import TableRow from 'Components/Table/TableRow';
 import { kinds } from 'Helpers/Props';
 import createAjaxRequest from 'Utilities/createAjaxRequest';
-import titleCase from 'Utilities/String/titleCase';
 import translate from 'Utilities/String/translate';
 import styles from './ImportListItemsModalContent.css';
 
 const PAGE_SIZE = 20;
 
-const STATE_KINDS = {
-  downloaded: kinds.SUCCESS,
-  queued: kinds.PURPLE,
-  missing: kinds.WARNING,
-  unmonitored: kinds.DISABLED,
-  excluded: kinds.DANGER,
-  pendingAuthor: kinds.INFO,
-  notInLibrary: kinds.DEFAULT,
-  unknown: kinds.DEFAULT
+const STATES = {
+  downloaded: { kind: kinds.SUCCESS, label: 'Downloaded' },
+  queued: { kind: kinds.PURPLE, label: 'Queued' },
+  missing: { kind: kinds.WARNING, label: 'Missing' },
+  unmonitored: { kind: kinds.DISABLED, label: 'Unmonitored' },
+  excluded: { kind: kinds.DANGER, label: 'Excluded' },
+  pendingAuthor: { kind: kinds.INFO, label: 'PendingAuthor' },
+  notInLibrary: { kind: kinds.DEFAULT, label: 'NotInLibrary' }
 };
-
-const STATE_LABELS = {
-  downloaded: 'Downloaded',
-  queued: 'Queued',
-  missing: 'Missing',
-  unmonitored: 'Unmonitored',
-  excluded: 'Excluded',
-  pendingAuthor: 'PendingAuthor',
-  notInLibrary: 'NotInLibrary',
-  unknown: 'Unknown'
-};
-
-const MEDIA_TYPE_LABELS = {
-  ebook: 'Ebook',
-  audiobook: 'Audiobook'
-};
-
-function normalizeState(state) {
-  if (!state) {
-    return 'unknown';
-  }
-
-  const key = state.charAt(0).toLowerCase() + state.slice(1);
-
-  return STATE_LABELS[key] ? key : 'unknown';
-}
-
-function stateLabel(state) {
-  return translate(STATE_LABELS[normalizeState(state)]);
-}
 
 function mediaTypeLabel(mediaType) {
-  const key = (mediaType || '').toLowerCase();
-  const translationKey = MEDIA_TYPE_LABELS[key];
+  return mediaType === 'ebook' ? translate('Ebook') : translate('Audiobook');
+}
 
-  return translationKey ? titleCase(translate(translationKey)) : titleCase(mediaType || '');
+function renderDateCell(date, caption) {
+  return (
+    <TableRowCell className={styles.dateCell}>
+      {
+        date ?
+          <RelativeDateCellConnector
+            className={styles.dateValue}
+            date={date}
+            component="span"
+          /> :
+          <Label
+            kind={kinds.DEFAULT}
+            outline={true}
+          >
+            {translate('NotAvailable')}
+          </Label>
+      }
+
+      {
+        date && caption ?
+          <div className={styles.dateSource}>
+            {caption}
+          </div> :
+          null
+      }
+    </TableRowCell>
+  );
 }
 
 class ImportListItemsModalContent extends Component {
@@ -117,13 +111,7 @@ class ImportListItemsModalContent extends Component {
     const ajaxRequest = createAjaxRequest({
       url: id ? `/importlist/${id}/items` : '/importlist/items',
       dataType: 'json',
-      data: {
-        page,
-        pageSize: PAGE_SIZE,
-        sortKey: 'dateAdded',
-        sortDirection: 'descending',
-        refresh
-      }
+      data: { page, pageSize: PAGE_SIZE, refresh }
     });
 
     this._request = ajaxRequest;
@@ -138,9 +126,8 @@ class ImportListItemsModalContent extends Component {
       this.setState({
         page: data.page,
         totalRecords: data.totalRecords,
-        records: data.records || [],
-        isFetching: false,
-        error: null
+        records: data.records,
+        isFetching: false
       });
     }, (xhr) => {
       if (xhr.aborted || this._request !== ajaxRequest) {
@@ -154,6 +141,10 @@ class ImportListItemsModalContent extends Component {
         error: xhr
       });
     });
+  }
+
+  getTotalPages() {
+    return Math.max(1, Math.ceil(this.state.totalRecords / PAGE_SIZE));
   }
 
   //
@@ -186,40 +177,28 @@ class ImportListItemsModalContent extends Component {
   //
   // Render
 
-  getTotalPages() {
-    return Math.max(1, Math.ceil(this.state.totalRecords / PAGE_SIZE));
-  }
-
-  renderStates(item) {
-    const media = item.media || [];
-
-    if (!media.length || ['excluded', 'pendingAuthor', 'notInLibrary'].includes(normalizeState(item.state))) {
-      const key = normalizeState(item.state);
-
+  renderStates({ state, media, pendingError }) {
+    if (state === 'excluded' || !media.length) {
       return (
         <Label
-          kind={STATE_KINDS[key]}
-          outline={key !== 'downloaded'}
-          title={item.pendingError || undefined}
+          kind={STATES[state].kind}
+          outline={true}
+          title={pendingError}
         >
-          {stateLabel(item.state)}
+          {translate(STATES[state].label)}
         </Label>
       );
     }
 
-    return media.map((entry) => {
-      const key = normalizeState(entry.state);
-
-      return (
-        <Label
-          key={`${entry.mediaType}-${entry.bookId}`}
-          kind={STATE_KINDS[key]}
-          outline={key !== 'downloaded'}
-        >
-          {`${mediaTypeLabel(entry.mediaType)}: ${stateLabel(entry.state)}`}
-        </Label>
-      );
-    });
+    return media.map((entry) => (
+      <Label
+        key={entry.bookId}
+        kind={STATES[entry.state].kind}
+        outline={entry.state !== 'downloaded'}
+      >
+        {`${mediaTypeLabel(entry.mediaType)}: ${translate(STATES[entry.state].label)}`}
+      </Label>
+    ));
   }
 
   renderRow(item, index) {
@@ -229,21 +208,19 @@ class ImportListItemsModalContent extends Component {
       author,
       images,
       bookId,
+      media,
+      sources,
       releaseDate,
       dateAdded,
-      dateAddedFromList,
-      bookProviderId,
-      editionProviderId
+      dateAddedFromList
     } = item;
 
-    const key = `${bookProviderId || editionProviderId || title}-${index}`;
     const bookLink = bookId ? `/book/${bookId}` : null;
-    const mediaLinks = (item.media || []).filter((entry) => entry && entry.bookId);
 
     const cover = (
       <BookCover
         className={styles.cover}
-        images={images || []}
+        images={images}
         size={70}
         lazy={false}
         overflow={true}
@@ -251,7 +228,7 @@ class ImportListItemsModalContent extends Component {
     );
 
     return (
-      <TableRow key={key}>
+      <TableRow key={`${bookId || title}-${index}`}>
         <TableRowCell className={styles.coverCell}>
           {
             bookLink ?
@@ -293,10 +270,10 @@ class ImportListItemsModalContent extends Component {
           }
 
           {
-            mediaLinks.length ?
+            media.length ?
               <div className={styles.mediaLinks}>
                 {
-                  mediaLinks.map((entry, linkIndex) => (
+                  media.map((entry, linkIndex) => (
                     <span key={entry.bookId}>
                       {linkIndex > 0 ? ' · ' : null}
                       <Link to={`/book/${entry.bookId}`}>
@@ -315,16 +292,12 @@ class ImportListItemsModalContent extends Component {
             null :
             <TableRowCell className={styles.sourcesCell}>
               {
-                (item.sources || []).map((source) => (
+                sources.map((source) => (
                   <div
                     key={source.importListId}
                     className={styles.source}
                   >
-                    {
-                      source.implementationName ?
-                        <div className={styles.sourceType}>{source.implementationName}</div> :
-                        null
-                    }
+                    <div className={styles.sourceType}>{source.implementationName}</div>
                     <div className={styles.sourceName}>{source.name}</div>
                   </div>
                 ))
@@ -338,48 +311,8 @@ class ImportListItemsModalContent extends Component {
           </div>
         </TableRowCell>
 
-        {
-          releaseDate ?
-            <RelativeDateCellConnector
-              className={styles.dateCell}
-              date={releaseDate}
-              timeForToday={false}
-            /> :
-            <TableRowCell className={styles.dateCell}>
-              <Label
-                kind={kinds.DEFAULT}
-                outline={true}
-              >
-                {translate('NotAvailable')}
-              </Label>
-            </TableRowCell>
-        }
-
-        {
-          dateAdded ?
-            <TableRowCell className={styles.dateCell}>
-              <RelativeDateCellConnector
-                component="span"
-                className={styles.dateValue}
-                date={dateAdded}
-              />
-              {
-                dateAddedFromList ?
-                  null :
-                  <div className={styles.dateSource}>
-                    {translate('InLibrarySince')}
-                  </div>
-              }
-            </TableRowCell> :
-            <TableRowCell className={styles.dateCell}>
-              <Label
-                kind={kinds.DEFAULT}
-                outline={true}
-              >
-                {translate('NotAvailable')}
-              </Label>
-            </TableRowCell>
-        }
+        {renderDateCell(releaseDate)}
+        {renderDateCell(dateAdded, dateAddedFromList ? null : translate('InLibrarySince'))}
       </TableRow>
     );
   }
@@ -403,47 +336,38 @@ class ImportListItemsModalContent extends Component {
       {
         name: 'cover',
         label: '',
-        isVisible: true,
-        isSortable: false
+        isVisible: true
       },
       {
         name: 'title',
         label: translate('Title'),
-        isVisible: true,
-        isSortable: false
+        isVisible: true
       },
       {
         name: 'sources',
         className: styles.leftHeader,
         label: translate('ImportLists'),
-        isVisible: !id,
-        isSortable: false
+        isVisible: !id
       },
       {
         name: 'status',
         className: styles.leftHeader,
         label: translate('Status'),
-        isVisible: true,
-        isSortable: false
+        isVisible: true
       },
       {
         name: 'releaseDate',
         className: styles.leftHeader,
         label: translate('ReleaseDate'),
-        isVisible: true,
-        isSortable: false
+        isVisible: true
       },
       {
         name: 'dateAdded',
         className: styles.leftHeader,
         label: translate('DateAdded'),
-        isVisible: true,
-        isSortable: false
+        isVisible: true
       }
     ];
-
-    const totalPages = this.getTotalPages();
-    const showEmpty = !isFetching && !error && !records.length;
 
     return (
       <ModalContent onModalClose={onModalClose}>
@@ -467,7 +391,7 @@ class ImportListItemsModalContent extends Component {
           }
 
           {
-            showEmpty ?
+            !isFetching && !error && !records.length ?
               <div className={styles.empty}>
                 {translate('ImportListItemsEmpty')}
               </div> :
@@ -485,7 +409,7 @@ class ImportListItemsModalContent extends Component {
 
                 <TablePager
                   page={page}
-                  totalPages={totalPages}
+                  totalPages={this.getTotalPages()}
                   totalRecords={totalRecords}
                   isFetching={isFetching}
                   onFirstPagePress={this.onFirstPagePress}
